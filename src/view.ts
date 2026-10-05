@@ -2728,13 +2728,15 @@ export class LumenPdfView extends FileView {
     const itemCount = directWindow ? this.index.logicalSize : filteredItems?.length ?? 0;
     // Read current layout before replacing the window. Initial opening passes
     // explicit values, so it performs no synchronous layout reads at all.
+    // Reading clientHeight after empty() forces a layout of the empty list,
+    // which clamps scrollTop to 0 and snaps the scrollbar back to the top.
     const scrollTop = scrollTopOverride ?? this.inspectorList.scrollTop;
+    const viewport = (viewportOverride ?? this.inspectorList.clientHeight) || 500;
     this.inspectorList.empty();
     if (!itemCount) {
       this.inspectorList.createDiv({ cls: "lumod-empty", text: "No matching annotations" });
       return;
     }
-    const viewport = (viewportOverride ?? this.inspectorList.clientHeight) || 500;
     const logicalHeight = itemCount * CARD_HEIGHT;
     const virtualHeight = this.inspectorVirtualHeight(itemCount);
     const visibleCount = Math.max(1, Math.ceil(viewport / CARD_HEIGHT));

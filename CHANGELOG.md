@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.3 — 2026-10-05
+
+- Fixed the annotation inspector's scrollbar jumping back to the top while scrolling.
+
 ## Mod 1.0.2 — 2026-10-05
 
 - The annotation inspector now sorts by page by default.
