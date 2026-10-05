@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.1 — 2026-10-05
+
+- Releases are now published automatically: every push to `main` builds the plugin and creates (or updates) the GitHub release and tag for the version in `manifest.json`, so BRAT can install and update it.
+
 ## Mod 1.0.0 — 2026-10-05
 
 - Forked as a separate plugin, **Lumen PDF Annotator Mod** (`lumen-pdf-annotator-mod`). It has its own storage (`.lumen-pdf-mod/`), view type, link scheme (`obsidian://lumen-pdf-mod`), and CSS namespace, so it can't collide with the original. When the fork first opens a PDF, it copies that PDF's existing annotations from the original plugin's storage. It never writes to the original's storage.
