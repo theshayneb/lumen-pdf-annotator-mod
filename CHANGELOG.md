@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.5 — 2026-10-05
+
+- Plugin storage moved from `.lumen-pdf-mod/` to `Dashboard/` (annotation bundles, file index, exports, and recovered PDFs). Each PDF's annotations are copied from `.lumen-pdf-mod/` (or the original plugin's `.lumen-pdf/`) the first time it is opened. The old folder is never modified, so it can be deleted once every annotated PDF has been opened. PDFs not yet reopened can still be exported, and their recovery copies can still be restored, from the old folder.
+
 ## Mod 1.0.4 — 2026-10-05
 
 - Sidecar notes are now saved in the vault root (`Smith 2024.md`) instead of beside the PDF. If that name is taken by your own note or by another PDF's sidecar, `Smith 2024 2.md`, `3`, … is used instead. Sidecars now record their PDF in a `lumen-pdf-path` property. Sidecars written beside PDFs by earlier versions are left where they are.

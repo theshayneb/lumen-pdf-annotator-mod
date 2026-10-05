@@ -1,8 +1,8 @@
 # Lumen PDF Annotator Mod
 
-> **This is a fork of [Lumen PDF Annotator](https://github.com/BenGutteridge1/lumen-pdf-annotator) by Ben Gutteridge.** It is a separate plugin with its own plugin ID (`lumen-pdf-annotator-mod`), settings, storage folder (`.lumen-pdf-mod/`), view type, and link scheme (`obsidian://lumen-pdf-mod`), so it does not share or modify the original plugin's data. Disable the original before enabling this one, since only one plugin can be the default PDF viewer.
+> **This is a fork of [Lumen PDF Annotator](https://github.com/BenGutteridge1/lumen-pdf-annotator) by Ben Gutteridge.** It is a separate plugin with its own plugin ID (`lumen-pdf-annotator-mod`), settings, storage folder (`Dashboard/`), view type, and link scheme (`obsidian://lumen-pdf-mod`), so it does not share or modify the original plugin's data. Disable the original before enabling this one, since only one plugin can be the default PDF viewer.
 >
-> The first time this fork opens a PDF, it copies that PDF's annotations from the original plugin's `.lumen-pdf-mod/` storage if any exist. It reads that folder but never writes to it.
+> The first time this fork opens a PDF, it copies that PDF's annotations from the original plugin's `.lumen-pdf/` storage if any exist. It reads that folder but never writes to it. Annotations saved by versions 1.0.0–1.0.4 of this fork in `.lumen-pdf-mod/` are copied into `Dashboard/` the same way.
 >
 > **Added in this fork:**
 >
@@ -63,7 +63,7 @@ The production bundle was also exercised inside Obsidian 1.13.7 with a synthetic
 The source PDF is never edited. Lumen hashes its bytes with SHA-256 and stores a recoverable bundle in your vault:
 
 ```text
-.lumen-pdf-mod/
+Dashboard/
   bundles/
     sha256/
       <document-hash>/
@@ -123,10 +123,10 @@ Previous page, next page, page-note placement, annotation checkpoint, export, le
 
 ### Backup, export, and migration commands
 
-- **Export annotations for this PDF** writes a readable Markdown file under `.lumen-pdf-mod/exports/`. In **Settings → Lumen PDF Annotator → Export annotations**, choose individual annotated PDFs or select all filtered matches and export them together. Each PDF gets a separate, uniquely named Markdown note with the source PDF path, page headings, quoted highlight text, attached notes, tags, and links back to the exact annotation. Multi-page highlights stay grouped with their one associated note. Exports do not include raw recovery JSON and do not change the source PDFs.
+- **Export annotations for this PDF** writes a readable Markdown file under `Dashboard/exports/`. In **Settings → Lumen PDF Annotator → Export annotations**, choose individual annotated PDFs or select all filtered matches and export them together. Each PDF gets a separate, uniquely named Markdown note with the source PDF path, page headings, quoted highlight text, attached notes, tags, and links back to the exact annotation. Multi-page highlights stay grouped with their one associated note. Exports do not include raw recovery JSON and do not change the source PDFs.
 - **Save an annotation checkpoint** immediately compacts the journal into a snapshot.
 - **Verify all PDF backup checksums** checks every local backup against its SHA-256 identity.
-- **Restore a backed-up PDF** verifies the checksum before creating a non-destructive copy under `.lumen-pdf-mod/recovered/`.
+- **Restore a backed-up PDF** verifies the checksum before creating a non-destructive copy under `Dashboard/recovered/`.
 - **Import legacy annotations for this PDF** explicitly imports compatible user-owned annotation data when present and uses stable IDs to prevent duplicates. Lumen does not scan every Markdown note when a PDF opens.
 
 ## Settings

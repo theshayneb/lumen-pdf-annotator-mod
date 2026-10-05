@@ -2,7 +2,7 @@ import { FuzzySuggestModal, Modal, normalizePath, Notice, ObsidianProtocolData, 
 import type { SettingDefinitionItem } from "obsidian";
 import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
-import { AnnotationBundleInfo, BundleInfo, exportAnnotationBundle, listAnnotationBundles, listBundles, restoreBundle, verifyBundle } from "./storage";
+import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, restoreBundle, verifyBundle } from "./storage";
 import type { SidecarGrouping } from "./annotation-export";
 import { LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
@@ -310,7 +310,7 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Export annotations",
-        desc: "Choose PDFs with Lumen annotations and export each one as a readable Markdown note in .lumen-pdf-mod/exports/.",
+        desc: `Choose PDFs with Lumen annotations and export each one as a readable Markdown note in ${STORAGE_FOLDER}/exports/.`,
         render: setting => {
           setting.addButton(button => button.setButtonText("Choose PDFs to export").onClick(() => new AnnotationExportModal(this.plugin).open()));
         },
@@ -465,7 +465,7 @@ class AnnotationExportModal extends Modal {
     }
     this.busy = false;
     this.renderList();
-    this.statusEl.setText(`${exported} PDF${exported === 1 ? "" : "s"} exported to .lumen-pdf-mod/exports/${failures.length ? ` · ${failures.length} failed` : ""}`);
+    this.statusEl.setText(`${exported} PDF${exported === 1 ? "" : "s"} exported to ${STORAGE_FOLDER}/exports/${failures.length ? ` · ${failures.length} failed` : ""}`);
     new Notice(this.statusEl.textContent ?? "Export complete.", failures.length ? 8000 : 5000);
   }
 }

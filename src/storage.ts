@@ -2,12 +2,13 @@ import { normalizePath, TFile, Vault } from "obsidian";
 import { AnnotationIndex, AnnotationMutation, MARK_COLORS, MarkStyle, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
-const STORAGE_FOLDER = ".lumen-pdf-mod";
+export const STORAGE_FOLDER = "Dashboard";
 const ROOT = `${STORAGE_FOLDER}/bundles/sha256`;
 const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
-// The original Lumen plugin's storage. This fork never writes there; it only
-// copies a PDF's annotations across the first time the fork opens that PDF.
-const ORIGINAL_LUMEN_ROOT = ".lumen-pdf/bundles/sha256";
+// Earlier storage locations, newest first: this fork's 1.0.0–1.0.4 folder and
+// the original Lumen plugin's folder. They are never written to; a PDF's
+// annotations are copied across the first time it is opened here.
+const PREVIOUS_ROOTS = [".lumen-pdf-mod/bundles/sha256", ".lumen-pdf/bundles/sha256"];
 const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
 const ANNOTATION_FILES = [
   "annotations.snapshot.json",
@@ -423,7 +424,7 @@ export async function openBundle(
   const hash = await documentHash(vault, file, bytes);
   const folder = normalizePath(`${ROOT}/${hash}`);
   await ensureFolder(vault, folder);
-  await importOriginalLumenAnnotations(vault, hash, folder);
+  await importPreviousAnnotations(vault, hash, folder);
   const backupPath = `${folder}/document.pdf`;
   if (automaticPdfBackup && !(await vault.adapter.exists(backupPath))) schedulePdfBackup(vault, file.path, backupPath);
   const manifestPath = `${folder}/manifest.json`;
@@ -455,17 +456,20 @@ async function hasAnnotationFiles(vault: Vault, folder: string): Promise<boolean
   return false;
 }
 
-/** One-way, one-time copy from the original Lumen plugin's storage. */
-async function importOriginalLumenAnnotations(vault: Vault, hash: string, folder: string): Promise<void> {
+/** One-way, one-time copy from the newest previous storage location that has this PDF. */
+async function importPreviousAnnotations(vault: Vault, hash: string, folder: string): Promise<void> {
   if (await hasAnnotationFiles(vault, folder)) return;
-  const source = `${ORIGINAL_LUMEN_ROOT}/${hash}`;
-  if (!(await hasAnnotationFiles(vault, source))) return;
-  try {
-    for (const name of ANNOTATION_FILES) {
-      if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
+  for (const root of PREVIOUS_ROOTS) {
+    const source = `${root}/${hash}`;
+    if (!(await hasAnnotationFiles(vault, source))) continue;
+    try {
+      for (const name of ANNOTATION_FILES) {
+        if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
+      }
+    } catch (error) {
+      console.error(`Lumen could not import annotations from ${root}`, error);
     }
-  } catch (error) {
-    console.error("Lumen could not import annotations from the original Lumen plugin", error);
+    return;
   }
 }
 
@@ -483,18 +487,25 @@ function coerceManifest(value: unknown, hash: string): BundleManifest | null {
 }
 
 export async function listBundles(vault: Vault): Promise<BundleInfo[]> {
-  if (!(await vault.adapter.exists(ROOT))) return [];
-  const listing = await vault.adapter.list(ROOT);
   const bundles: BundleInfo[] = [];
-  for (const folder of listing.folders) {
-    const hash = folder.split("/").pop() ?? "";
-    const manifestPath = `${folder}/manifest.json`;
-    const backupPath = `${folder}/document.pdf`;
-    if (!hash || !(await vault.adapter.exists(manifestPath)) || !(await vault.adapter.exists(backupPath))) continue;
-    try {
-      const manifest = coerceManifest(JSON.parse(await vault.adapter.read(manifestPath)), hash);
-      if (manifest) bundles.push({ hash, folder, backupPath, manifest });
-    } catch { /* a malformed bundle is reported by verification only when discoverable */ }
+  const seen = new Set<string>();
+  // Backups made before the storage folder moved stay restorable where they are.
+  for (const root of [ROOT, PREVIOUS_ROOTS[0]]) {
+    if (!(await vault.adapter.exists(root))) continue;
+    for (const folder of (await vault.adapter.list(root)).folders) {
+      const hash = folder.split("/").pop() ?? "";
+      if (seen.has(hash)) continue;
+      const manifestPath = `${folder}/manifest.json`;
+      const backupPath = `${folder}/document.pdf`;
+      if (!hash || !(await vault.adapter.exists(manifestPath)) || !(await vault.adapter.exists(backupPath))) continue;
+      try {
+        const manifest = coerceManifest(JSON.parse(await vault.adapter.read(manifestPath)), hash);
+        if (manifest) {
+          bundles.push({ hash, folder, backupPath, manifest });
+          seen.add(hash);
+        }
+      } catch { /* a malformed bundle is reported by verification only when discoverable */ }
+    }
   }
   return bundles.sort((a, b) => b.manifest.updatedAt.localeCompare(a.manifest.updatedAt));
 }
@@ -503,7 +514,8 @@ export async function listBundles(vault: Vault): Promise<BundleInfo[]> {
 export async function listAnnotationBundles(vault: Vault): Promise<AnnotationBundleInfo[]> {
   const bundles: AnnotationBundleInfo[] = [];
   const seen = new Set<string>();
-  for (const root of [ROOT, LEGACY_ROOT]) {
+  // Not-yet-reopened PDFs from the previous folder stay exportable.
+  for (const root of [ROOT, PREVIOUS_ROOTS[0], LEGACY_ROOT]) {
     if (!(await vault.adapter.exists(root))) continue;
     const folders = (await vault.adapter.list(root)).folders;
     for (let offset = 0; offset < folders.length; offset += 1) {
