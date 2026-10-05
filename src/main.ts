@@ -300,7 +300,7 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Sidecar note grouping",
-        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, next to it) is organised.",
+        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, in the vault root) is organised.",
         control: { type: "dropdown", key: "sidecarGrouping", options: { page: "By page", color: "By highlight colour" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
       },
       {

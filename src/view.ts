@@ -597,7 +597,7 @@ export class LumenPdfView extends FileView {
     if (this.bundle) await this.bundle.repository.flushJournal();
   }
 
-  /** Write `<pdf name>.md` next to the PDF. */
+  /** Write `<pdf name>.md` in the vault root. */
   async exportSidecar(): Promise<string | null> {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;

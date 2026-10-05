@@ -96,9 +96,11 @@ export async function writeAnnotationExport(vault: Vault, path: string, index: A
 const SIDECAR_MARKER = "lumen-sidecar";
 const SIDECAR_END = "%% lumen-sidecar-end: anything you write below this line is kept when the sidecar is re-exported %%";
 
-export function sidecarPath(pdf: TFile): string {
-  const folder = pdf.parent && !pdf.parent.isRoot() ? `${pdf.parent.path}/` : "";
-  return normalizePath(`${folder}${pdf.basename}.md`);
+const SIDECAR_PDF_KEY = "lumen-pdf-path";
+
+/** Sidecars live in the vault root: `<pdf name>.md`, then `<pdf name> 2.md`, … on name clashes. */
+function sidecarCandidate(pdf: TFile, attempt: number): string {
+  return normalizePath(`${pdf.basename}${attempt > 1 ? ` ${attempt}` : ""}.md`);
 }
 
 function yamlString(value: string): string {
@@ -140,6 +142,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
   const lines = [
     "---",
     `${SIDECAR_MARKER}: true`,
+    `${SIDECAR_PDF_KEY}: ${yamlString(pdf.path)}`,
     `pdf: ${yamlString(`[[${pdf.path}|${pdf.name}]]`)}`,
     `exported: ${new Date().toISOString()}`,
     `annotations: ${entries.length}`,
@@ -188,7 +191,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
 
 export class SidecarConflictError extends Error {
   constructor(readonly path: string) {
-    super(`${path} already exists and was not created by this plugin, so it was left unchanged.`);
+    super(`${path} and its numbered alternatives are already taken, so no sidecar was written.`);
   }
 }
 
@@ -197,19 +200,48 @@ function isSidecar(content: string): boolean {
   return !!frontmatter && new RegExp(`^${SIDECAR_MARKER}:\\s*true\\s*$`, "m").test(frontmatter[1]);
 }
 
+/** The PDF path a sidecar was written for, or null if it is not a sidecar. */
+function sidecarOwner(content: string): string | null {
+  if (!isSidecar(content)) return null;
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
+  const explicit = frontmatter.match(new RegExp(`^${SIDECAR_PDF_KEY}:\\s*(.+?)\\s*$`, "m"))?.[1];
+  if (explicit) {
+    try { return String(JSON.parse(explicit)); } catch { return explicit; }
+  }
+  // Sidecars from 1.0.0–1.0.3 only carry the `pdf: "[[path|name]]"` link.
+  return frontmatter.match(/^pdf:\s*"\[\[(.+?)\|/m)?.[1] ?? "";
+}
+
 /**
- * Write `<pdf name>.md` next to the PDF. Existing notes are overwritten only
- * when they are sidecars this plugin wrote, and text the user added below the
- * end marker is carried over.
+ * This PDF's sidecar in the vault root: the first of `<pdf name>.md`,
+ * `<pdf name> 2.md`, … that is free or already this PDF's sidecar. Notes the
+ * user wrote and other PDFs' sidecars are skipped, never overwritten.
+ */
+export async function sidecarPath(vault: Vault, pdf: TFile): Promise<string> {
+  for (let attempt = 1; attempt <= 100; attempt++) {
+    const path = sidecarCandidate(pdf, attempt);
+    const existing = vault.getAbstractFileByPath(path);
+    if (!existing) return path;
+    if (!(existing instanceof TFile)) continue;
+    const owner = sidecarOwner(await vault.cachedRead(existing));
+    if (owner === pdf.path || owner === "") return path;
+  }
+  throw new SidecarConflictError(sidecarCandidate(pdf, 1));
+}
+
+/**
+ * Write `<pdf name>.md` in the vault root. Existing notes are overwritten only
+ * when they are this PDF's sidecar, and text the user added below the end
+ * marker is carried over.
  */
 export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping): Promise<string> {
-  const path = sidecarPath(pdf);
+  const path = await sidecarPath(vault, pdf);
   const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
-    if (!isSidecar(await vault.read(existing))) throw new SidecarConflictError(path);
     await vault.process(existing, content => {
-      if (!isSidecar(content)) return content;
+      const owner = sidecarOwner(content);
+      if (owner !== pdf.path && owner !== "") return content;
       const end = content.indexOf(SIDECAR_END);
       const kept = end === -1 ? "" : content.slice(end + SIDECAR_END.length).replace(/^\r?\n/, "");
       return generated + kept;

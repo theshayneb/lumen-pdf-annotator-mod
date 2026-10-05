@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.4 — 2026-10-05
+
+- Sidecar notes are now saved in the vault root (`Smith 2024.md`) instead of beside the PDF. If that name is taken by your own note or by another PDF's sidecar, `Smith 2024 2.md`, `3`, … is used instead. Sidecars now record their PDF in a `lumen-pdf-path` property. Sidecars written beside PDFs by earlier versions are left where they are.
+
 ## Mod 1.0.3 — 2026-10-05
 
 - Fixed the annotation inspector's scrollbar jumping back to the top while scrolling.
