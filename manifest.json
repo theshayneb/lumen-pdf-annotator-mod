@@ -1,10 +1,10 @@
 {
-  "id": "lumen-pdf-annotator",
-  "name": "Lumen PDF Annotator",
-  "version": "1.0.19",
+  "id": "lumen-pdf-annotator-mod",
+  "name": "Lumen PDF Annotator Mod",
+  "version": "1.0.0",
   "minAppVersion": "1.13.7",
-  "description": "Read, search, highlight, and annotate PDFs with themes, searchable notes, local storage, and performance-focused rendering.",
-  "author": "Ben Gutteridge",
-  "authorUrl": "https://github.com/BenGutteridge1",
+  "description": "A fork of Lumen PDF Annotator that adds colour-based annotation views and sidecar Markdown exports.",
+  "author": "theshayneb (fork of Lumen by Ben Gutteridge)",
+  "authorUrl": "https://github.com/theshayneb",
   "isDesktopOnly": false
 }

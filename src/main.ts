@@ -3,6 +3,7 @@ import type { SettingDefinitionItem } from "obsidian";
 import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
 import { AnnotationBundleInfo, BundleInfo, exportAnnotationBundle, listAnnotationBundles, listBundles, restoreBundle, verifyBundle } from "./storage";
+import type { SidecarGrouping } from "./annotation-export";
 import { LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
 
@@ -11,6 +12,8 @@ interface LumenSettings {
   pdfTheme: PdfTheme;
   legacyAnnotationFolder: string;
   automaticPdfBackups: boolean;
+  sidecarGrouping: SidecarGrouping;
+  sidecarAutoSync: boolean;
 }
 
 const DEFAULT_SETTINGS: LumenSettings = {
@@ -18,10 +21,16 @@ const DEFAULT_SETTINGS: LumenSettings = {
   pdfTheme: "light",
   legacyAnnotationFolder: "PDF annotations",
   automaticPdfBackups: false,
+  sidecarGrouping: "page",
+  sidecarAutoSync: false,
 };
 
 function isPdfTheme(value: unknown): value is PdfTheme {
   return value === "light" || value === "sepia" || value === "dark";
+}
+
+function isSidecarGrouping(value: unknown): value is SidecarGrouping {
+  return value === "page" || value === "color";
 }
 
 function readSettings(value: unknown): LumenSettings {
@@ -32,6 +41,8 @@ function readSettings(value: unknown): LumenSettings {
     pdfTheme: isPdfTheme(stored.pdfTheme) ? stored.pdfTheme : DEFAULT_SETTINGS.pdfTheme,
     legacyAnnotationFolder: typeof stored.legacyAnnotationFolder === "string" ? stored.legacyAnnotationFolder : DEFAULT_SETTINGS.legacyAnnotationFolder,
     automaticPdfBackups: typeof stored.automaticPdfBackups === "boolean" ? stored.automaticPdfBackups : DEFAULT_SETTINGS.automaticPdfBackups,
+    sidecarGrouping: isSidecarGrouping(stored.sidecarGrouping) ? stored.sidecarGrouping : DEFAULT_SETTINGS.sidecarGrouping,
+    sidecarAutoSync: typeof stored.sidecarAutoSync === "boolean" ? stored.sidecarAutoSync : DEFAULT_SETTINGS.sidecarAutoSync,
   };
 }
 
@@ -58,6 +69,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.legacyAnnotationFolder,
       this.settings.automaticPdfBackups,
       () => this.viewState.attach(leaf),
+      () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoSync }),
     ));
     if (this.settings.defaultViewer) this.installAsDefaultPdfViewer();
     this.registerObsidianProtocolHandler(LUMEN_PROTOCOL_ACTION, params => void this.openAnnotationLink(params).catch(error => {
@@ -89,6 +101,10 @@ export default class LumenPdfPlugin extends Plugin {
     });
     this.addReaderCommand("export-annotations", "Export annotations for this PDF", async view => {
       const path = await view.exportAnnotations();
+      if (path) new Notice(`Annotations exported to ${path}`);
+    });
+    this.addReaderCommand("export-annotations-sidecar", "Export annotations to sidecar Markdown note", async view => {
+      const path = await view.exportSidecar();
       if (path) new Notice(`Annotations exported to ${path}`);
     });
     this.addReaderCommand("import-legacy-annotations", "Import legacy annotations for this PDF", view => view.importLegacyAnnotations(true));
@@ -283,8 +299,18 @@ class LumenSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "automaticPdfBackups", defaultValue: DEFAULT_SETTINGS.automaticPdfBackups },
       },
       {
+        name: "Sidecar note grouping",
+        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, next to it) is organised.",
+        control: { type: "dropdown", key: "sidecarGrouping", options: { page: "By page", color: "By highlight colour" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
+      },
+      {
+        name: "Keep sidecar notes up to date",
+        desc: "Rewrite the sidecar note automatically a moment after each annotation change. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept.",
+        control: { type: "toggle", key: "sidecarAutoSync", defaultValue: DEFAULT_SETTINGS.sidecarAutoSync },
+      },
+      {
         name: "Export annotations",
-        desc: "Choose PDFs with Lumen annotations and export each one as a readable Markdown note in .lumen-pdf/exports/.",
+        desc: "Choose PDFs with Lumen annotations and export each one as a readable Markdown note in .lumen-pdf-mod/exports/.",
         render: setting => {
           setting.addButton(button => button.setButtonText("Choose PDFs to export").onClick(() => new AnnotationExportModal(this.plugin).open()));
         },
@@ -297,6 +323,8 @@ class LumenSettingTab extends PluginSettingTab {
     if (key === "pdfTheme") return this.plugin.settings.pdfTheme;
     if (key === "legacyAnnotationFolder") return this.plugin.settings.legacyAnnotationFolder;
     if (key === "automaticPdfBackups") return this.plugin.settings.automaticPdfBackups;
+    if (key === "sidecarGrouping") return this.plugin.settings.sidecarGrouping;
+    if (key === "sidecarAutoSync") return this.plugin.settings.sidecarAutoSync;
     return undefined;
   }
 
@@ -314,6 +342,14 @@ class LumenSettingTab extends PluginSettingTab {
     }
     if (key === "automaticPdfBackups" && typeof value === "boolean") {
       this.plugin.settings.automaticPdfBackups = value;
+      return this.plugin.saveSettings();
+    }
+    if (key === "sidecarGrouping" && isSidecarGrouping(value)) {
+      this.plugin.settings.sidecarGrouping = value;
+      return this.plugin.saveSettings();
+    }
+    if (key === "sidecarAutoSync" && typeof value === "boolean") {
+      this.plugin.settings.sidecarAutoSync = value;
       return this.plugin.saveSettings();
     }
   }
@@ -334,27 +370,27 @@ class AnnotationExportModal extends Modal {
   }
 
   async onOpen(): Promise<void> {
-    this.modalEl.addClass("lumen-export-modal");
+    this.modalEl.addClass("lumod-export-modal");
     this.titleEl.setText("Export PDF annotations");
     this.contentEl.empty();
     this.contentEl.createEl("p", { text: "Select the PDFs to export. Each PDF gets its own markdown note with its highlights, associated notes, and page references." });
-    const search = this.contentEl.createEl("input", { type: "search", placeholder: "Filter PDFs by name or path", cls: "lumen-export-search" });
+    const search = this.contentEl.createEl("input", { type: "search", placeholder: "Filter PDFs by name or path", cls: "lumod-export-search" });
     search.setAttribute("aria-label", "Filter PDFs to export");
     search.addEventListener("input", () => { this.filter = search.value.toLowerCase().trim(); this.renderList(); });
-    const toolbar = this.contentEl.createDiv({ cls: "lumen-export-toolbar" });
+    const toolbar = this.contentEl.createDiv({ cls: "lumod-export-toolbar" });
     this.countEl = toolbar.createSpan();
-    const selectMatches = toolbar.createEl("button", { text: "Select all matches", cls: "lumen-export-quiet-button" });
+    const selectMatches = toolbar.createEl("button", { text: "Select all matches", cls: "lumod-export-quiet-button" });
     selectMatches.addEventListener("click", () => {
       for (const bundle of this.visibleBundles()) this.selected.add(bundle.folder);
       this.renderList();
     });
-    const clear = toolbar.createEl("button", { text: "Clear", cls: "lumen-export-quiet-button" });
+    const clear = toolbar.createEl("button", { text: "Clear", cls: "lumod-export-quiet-button" });
     clear.addEventListener("click", () => { this.selected.clear(); this.renderList(); });
-    this.listEl = this.contentEl.createDiv({ cls: "lumen-export-list" });
+    this.listEl = this.contentEl.createDiv({ cls: "lumod-export-list" });
     this.listEl.setAttribute("role", "group");
     this.listEl.setAttribute("aria-label", "PDFs with Lumen annotations");
-    this.statusEl = this.contentEl.createDiv({ cls: "lumen-export-status" });
-    const footer = this.contentEl.createDiv({ cls: "lumen-export-footer" });
+    this.statusEl = this.contentEl.createDiv({ cls: "lumod-export-status" });
+    const footer = this.contentEl.createDiv({ cls: "lumod-export-footer" });
     this.exportButton = footer.createEl("button", { text: "Export selected", cls: "mod-cta" });
     this.exportButton.addEventListener("click", () => void this.exportSelected());
     this.renderList("Finding annotated PDFs…");
@@ -383,16 +419,16 @@ class AnnotationExportModal extends Modal {
     this.countEl.setText(`${this.selected.size} selected · ${this.bundles.length} available`);
     this.exportButton.disabled = this.busy || this.selected.size === 0;
     if (message || this.bundles.length === 0) {
-      this.listEl.createEl("p", { text: message ?? "No PDFs with Lumen annotations were found in this vault.", cls: "lumen-export-empty" });
+      this.listEl.createEl("p", { text: message ?? "No PDFs with Lumen annotations were found in this vault.", cls: "lumod-export-empty" });
       return;
     }
     if (!visible.length) {
-      this.listEl.createEl("p", { text: "No PDFs match this filter.", cls: "lumen-export-empty" });
+      this.listEl.createEl("p", { text: "No PDFs match this filter.", cls: "lumod-export-empty" });
       return;
     }
     // Keep the modal cheap even when the vault has many annotated PDFs.
     for (const bundle of visible.slice(0, 150)) {
-      const row = this.listEl.createEl("label", { cls: "lumen-export-row" });
+      const row = this.listEl.createEl("label", { cls: "lumod-export-row" });
       const checkbox = row.createEl("input", { type: "checkbox" });
       checkbox.checked = this.selected.has(bundle.folder);
       checkbox.disabled = this.busy;
@@ -402,11 +438,11 @@ class AnnotationExportModal extends Modal {
         this.countEl.setText(`${this.selected.size} selected · ${this.bundles.length} available`);
         this.exportButton.disabled = this.selected.size === 0;
       });
-      const text = row.createSpan({ cls: "lumen-export-row-text" });
-      text.createSpan({ cls: "lumen-export-name", text: bundle.manifest.originalName });
-      text.createSpan({ cls: "lumen-export-path", text: bundle.manifest.workingPath });
+      const text = row.createSpan({ cls: "lumod-export-row-text" });
+      text.createSpan({ cls: "lumod-export-name", text: bundle.manifest.originalName });
+      text.createSpan({ cls: "lumod-export-path", text: bundle.manifest.workingPath });
     }
-    if (visible.length > 150) this.listEl.createEl("p", { text: `Showing the first 150 of ${visible.length} matches. Filter to browse more, or select all matches.`, cls: "lumen-export-empty" });
+    if (visible.length > 150) this.listEl.createEl("p", { text: `Showing the first 150 of ${visible.length} matches. Filter to browse more, or select all matches.`, cls: "lumod-export-empty" });
   }
 
   private async exportSelected(): Promise<void> {
@@ -429,7 +465,7 @@ class AnnotationExportModal extends Modal {
     }
     this.busy = false;
     this.renderList();
-    this.statusEl.setText(`${exported} PDF${exported === 1 ? "" : "s"} exported to .lumen-pdf/exports/${failures.length ? ` · ${failures.length} failed` : ""}`);
+    this.statusEl.setText(`${exported} PDF${exported === 1 ? "" : "s"} exported to .lumen-pdf-mod/exports/${failures.length ? ` · ${failures.length} failed` : ""}`);
     new Notice(this.statusEl.textContent ?? "Export complete.", failures.length ? 8000 : 5000);
   }
 }

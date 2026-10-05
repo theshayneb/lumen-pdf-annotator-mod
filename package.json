@@ -1,16 +1,16 @@
 {
-  "name": "lumen-pdf-annotator",
-  "version": "1.0.19",
+  "name": "lumen-pdf-annotator-mod",
+  "version": "1.0.0",
   "private": true,
-  "description": "Clean implementation of a performance-first PDF annotator for Obsidian.",
+  "description": "Fork of Lumen PDF Annotator with colour views and sidecar Markdown export.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BenGutteridge1/lumen-pdf-annotator.git"
+    "url": "git+https://github.com/theshayneb/lumen-pdf-annotator-mod.git"
   },
   "bugs": {
-    "url": "https://github.com/BenGutteridge1/lumen-pdf-annotator/issues"
+    "url": "https://github.com/theshayneb/lumen-pdf-annotator-mod/issues"
   },
-  "homepage": "https://github.com/BenGutteridge1/lumen-pdf-annotator#readme",
+  "homepage": "https://github.com/theshayneb/lumen-pdf-annotator-mod#readme",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit --skipLibCheck",

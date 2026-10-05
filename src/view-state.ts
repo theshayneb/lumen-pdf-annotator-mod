@@ -57,7 +57,7 @@ export class PdfViewStateManager {
   attach(leaf: WorkspaceLeaf): void {
     const view = leaf.view;
     if (!(view instanceof LumenPdfView) || !view.file || !view.isReaderReady()) return;
-    const root = view.containerEl.querySelector<HTMLElement>(".lumen-reader");
+    const root = view.containerEl.querySelector<HTMLElement>(".lumod-reader");
     if (!root) return;
     if (this.attached.has(root)) {
       const pending = this.pendingRestores.get(root);
@@ -65,12 +65,12 @@ export class PdfViewStateManager {
       if (pending) window.setTimeout(pending, 80);
       return;
     }
-    const scroll = root.querySelector<HTMLElement>(".lumen-scroll");
+    const scroll = root.querySelector<HTMLElement>(".lumod-scroll");
     if (!scroll) return;
     this.attached.add(root);
     const path = view.file.path;
-    const zoomButtons = root.querySelectorAll(".lumen-zoom-group .lumen-icon-button");
-    const pageInput = root.querySelector(".lumen-page-input");
+    const zoomButtons = root.querySelectorAll(".lumod-zoom-group .lumod-icon-button");
+    const pageInput = root.querySelector(".lumod-page-input");
 
     const saved = this.data.pdfs[stateKey(view, path)];
     let timer = 0;
@@ -149,7 +149,7 @@ export class PdfViewStateManager {
   }
 
   private async restore(view: LumenPdfView, root: HTMLElement, state: PdfViewState): Promise<boolean> {
-    const zoomLabel = root.querySelector<HTMLElement>(".lumen-zoom-label");
+    const zoomLabel = root.querySelector<HTMLElement>(".lumod-zoom-label");
     const savedZoom = Number.isFinite(state.zoom) ? state.zoom : 1.25;
     const roundedZoom = view.isMobileView() ? Math.round(savedZoom * 20) / 20 : Math.round(savedZoom * 4) / 4;
     const desiredZoom = Math.max(view.minimumZoom(), Math.min(4, roundedZoom));
@@ -158,7 +158,7 @@ export class PdfViewStateManager {
     if (view.isMobileView() || Math.abs(desiredZoom - currentZoom) >= 0.001) {
       await view.restoreZoom(desiredZoom, Boolean(state.mobileFit));
     }
-    const scroll = root.querySelector<HTMLElement>(".lumen-scroll");
+    const scroll = root.querySelector<HTMLElement>(".lumod-scroll");
     if (!root.isConnected || !root.clientWidth || !scroll?.clientHeight
       || root.ownerDocument.defaultView?.getComputedStyle(root).visibility === "hidden") return false;
     view.restorePage(page);
@@ -166,11 +166,11 @@ export class PdfViewStateManager {
   }
 
   private capture(view: LumenPdfView, root: HTMLElement, path: string, allowDetached = false): void {
-    const scroll = root.querySelector<HTMLElement>(".lumen-scroll");
+    const scroll = root.querySelector<HTMLElement>(".lumod-scroll");
     if (!allowDetached && (!root.isConnected || !root.clientWidth || !scroll?.clientHeight
       || root.ownerDocument.defaultView?.getComputedStyle(root).visibility === "hidden")) return;
-    const page = Number.parseInt(root.querySelector<HTMLInputElement>(".lumen-page-input")?.value ?? "1", 10);
-    const zoom = Number.parseInt(root.querySelector<HTMLElement>(".lumen-zoom-label")?.textContent ?? "125", 10) / 100;
+    const page = Number.parseInt(root.querySelector<HTMLInputElement>(".lumod-page-input")?.value ?? "1", 10);
+    const zoom = Number.parseInt(root.querySelector<HTMLElement>(".lumod-zoom-label")?.textContent ?? "125", 10) / 100;
     if (!Number.isFinite(page) || !Number.isFinite(zoom)) return;
     this.data.pdfs[stateKey(view, path)] = {
       page: Math.max(1, page),

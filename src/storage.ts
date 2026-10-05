@@ -2,9 +2,20 @@ import { normalizePath, TFile, Vault } from "obsidian";
 import { AnnotationIndex, AnnotationMutation, MARK_COLORS, MarkStyle, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
-const ROOT = ".lumen-pdf/bundles/sha256";
+const STORAGE_FOLDER = ".lumen-pdf-mod";
+const ROOT = `${STORAGE_FOLDER}/bundles/sha256`;
 const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
-const FILE_INDEX_ROOT = ".lumen-pdf/file-index";
+// The original Lumen plugin's storage. This fork never writes there; it only
+// copies a PDF's annotations across the first time the fork opens that PDF.
+const ORIGINAL_LUMEN_ROOT = ".lumen-pdf/bundles/sha256";
+const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
+const ANNOTATION_FILES = [
+  "annotations.snapshot.json",
+  "annotations.snapshot.previous.json",
+  "annotations.md",
+  "annotations.previous.md",
+  "annotations.journal.jsonl",
+];
 
 export interface BundleManifest {
   version: number;
@@ -250,6 +261,8 @@ export class AnnotationRepository {
   private flushTimer: number | null = null;
   private flushing: Promise<void> | null = null;
   private dirty = false;
+  /** Called after every queued mutation, e.g. to keep a sidecar note in sync. */
+  onChange: (() => void) | null = null;
 
   constructor(
     private readonly vault: Vault,
@@ -327,6 +340,7 @@ export class AnnotationRepository {
     const key = mutation.op === "put" ? mutation.annotation.id : mutation.id;
     this.queued.set(key, mutation);
     this.dirty = true;
+    this.onChange?.();
     if (this.flushTimer !== null) window.clearTimeout(this.flushTimer);
     this.flushTimer = window.setTimeout(() => {
       void this.flushJournal().catch(error => console.error("Lumen could not flush its annotation journal", error));
@@ -388,7 +402,7 @@ export class AnnotationRepository {
 
   async exportReadable(index: AnnotationIndex, originalName: string): Promise<string> {
     await this.flushJournal();
-    const folder = ".lumen-pdf/exports";
+    const folder = `${STORAGE_FOLDER}/exports`;
     await ensureFolder(this.vault, folder);
     const stem = originalName.replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "-").trim().slice(0, 90) || "PDF";
     const time = new Date().toISOString().replace(/[:.]/g, "-");
@@ -409,6 +423,7 @@ export async function openBundle(
   const hash = await documentHash(vault, file, bytes);
   const folder = normalizePath(`${ROOT}/${hash}`);
   await ensureFolder(vault, folder);
+  await importOriginalLumenAnnotations(vault, hash, folder);
   const backupPath = `${folder}/document.pdf`;
   if (automaticPdfBackup && !(await vault.adapter.exists(backupPath))) schedulePdfBackup(vault, file.path, backupPath);
   const manifestPath = `${folder}/manifest.json`;
@@ -431,6 +446,27 @@ export async function openBundle(
   if (shouldWriteManifest) await vault.adapter.write(manifestPath, JSON.stringify(manifest, null, 2));
   const repository = new AnnotationRepository(vault, folder, hash, file.path);
   return { hash, folder, repository };
+}
+
+async function hasAnnotationFiles(vault: Vault, folder: string): Promise<boolean> {
+  for (const name of ANNOTATION_FILES) {
+    if (await vault.adapter.exists(`${folder}/${name}`)) return true;
+  }
+  return false;
+}
+
+/** One-way, one-time copy from the original Lumen plugin's storage. */
+async function importOriginalLumenAnnotations(vault: Vault, hash: string, folder: string): Promise<void> {
+  if (await hasAnnotationFiles(vault, folder)) return;
+  const source = `${ORIGINAL_LUMEN_ROOT}/${hash}`;
+  if (!(await hasAnnotationFiles(vault, source))) return;
+  try {
+    for (const name of ANNOTATION_FILES) {
+      if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
+    }
+  } catch (error) {
+    console.error("Lumen could not import annotations from the original Lumen plugin", error);
+  }
 }
 
 function coerceManifest(value: unknown, hash: string): BundleManifest | null {
@@ -476,12 +512,7 @@ export async function listAnnotationBundles(vault: Vault): Promise<AnnotationBun
       if (!/^[a-f0-9]{64}$/.test(hash) || seen.has(hash)) continue;
       const manifestPath = `${folder}/manifest.json`;
       if (!(await vault.adapter.exists(manifestPath))) continue;
-      const hasAnnotations = await vault.adapter.exists(`${folder}/annotations.snapshot.json`)
-        || await vault.adapter.exists(`${folder}/annotations.snapshot.previous.json`)
-        || await vault.adapter.exists(`${folder}/annotations.md`)
-        || await vault.adapter.exists(`${folder}/annotations.previous.md`)
-        || await vault.adapter.exists(`${folder}/annotations.journal.jsonl`);
-      if (!hasAnnotations) continue;
+      if (!(await hasAnnotationFiles(vault, folder))) continue;
       try {
         const manifest = coerceManifest(JSON.parse(await vault.adapter.read(manifestPath)), hash);
         if (manifest) {
@@ -533,7 +564,7 @@ async function availablePath(vault: Vault, preferred: string): Promise<string> {
 export async function restoreBundle(vault: Vault, bundle: BundleInfo): Promise<TFile> {
   const verification = await verifyBundle(vault, bundle);
   if (!verification.ok) throw new Error(verification.reason ?? "backup verification failed");
-  const folder = ".lumen-pdf/recovered";
+  const folder = `${STORAGE_FOLDER}/recovered`;
   await ensureFolder(vault, folder);
   const path = await availablePath(vault, `${folder}/${safeFileName(bundle.manifest.originalName)}`);
   return vault.createBinary(path, await vault.adapter.readBinary(bundle.backupPath));

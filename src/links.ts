@@ -1,6 +1,6 @@
 import type { PdfAnnotation } from "./model";
 
-const ACTION = "lumen-pdf";
+const ACTION = "lumen-pdf-mod";
 
 export function annotationUri(vault: string, file: string, annotationId: string): string {
   const params = { vault, file, annotation: annotationId };

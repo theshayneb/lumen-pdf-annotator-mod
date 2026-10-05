@@ -6,7 +6,7 @@ import { builtinModules, createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const production = process.argv[2] === "production";
-const outputDirectory = process.env.LUMEN_PDF_ANNOTATOR_PLUGIN_DIR ?? path.resolve("dist");
+const outputDirectory = process.env.LUMEN_PDF_ANNOTATOR_MOD_PLUGIN_DIR ?? path.resolve("dist");
 const workerPath = require.resolve("pdfjs-dist/build/pdf.worker.min.mjs");
 fs.mkdirSync(outputDirectory, { recursive: true });
 
@@ -78,7 +78,7 @@ const options = {
   treeShaking: true,
   logLevel: "info",
   banner: {
-    js: "/*! Lumen PDF Annotator © 2026 Ben Gutteridge, MIT. Includes Mozilla PDF.js 4.10.38, Apache-2.0. See THIRD_PARTY_NOTICES.md. */",
+    js: "/*! Lumen PDF Annotator Mod, a fork of Lumen PDF Annotator © 2026 Ben Gutteridge, MIT. Includes Mozilla PDF.js 4.10.38, Apache-2.0. See THIRD_PARTY_NOTICES.md. */",
   },
   external: ["obsidian", "electron", "@codemirror/state", "@codemirror/view", ...builtinModules],
   plugins: [pdfPlugin, copyReleaseFiles],

@@ -28,6 +28,28 @@ export type AnnotationMutation =
 
 export const MARK_COLORS = ["#ffd12d", "#83cb67", "#6f9fe8", "#aa78df", "#e463a1"] as const;
 
+const MARK_COLOR_NAMES: Record<string, string> = {
+  "#ffd12d": "Yellow",
+  "#83cb67": "Green",
+  "#6f9fe8": "Blue",
+  "#aa78df": "Purple",
+  "#e463a1": "Pink",
+};
+
+/** A readable name for a mark colour; imported colours fall back to their CSS value. */
+export function colorName(color: string): string {
+  return MARK_COLOR_NAMES[color.toLowerCase()] ?? color;
+}
+
+/** Palette order first, then any other colours alphabetically. */
+export function compareColors(a: string, b: string): number {
+  const rank = (color: string) => {
+    const index = (MARK_COLORS as readonly string[]).indexOf(color.toLowerCase());
+    return index === -1 ? MARK_COLORS.length : index;
+  };
+  return rank(a) - rank(b) || a.toLowerCase().localeCompare(b.toLowerCase());
+}
+
 export class AnnotationIndex {
   private readonly items = new Map<string, PdfAnnotation>();
   private readonly pages = new Map<number, Set<string>>();

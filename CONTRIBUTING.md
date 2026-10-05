@@ -30,7 +30,7 @@ npm run build
 For live development, direct output to a test-vault plugin folder:
 
 ```bash
-LUMEN_PDF_ANNOTATOR_PLUGIN_DIR="/absolute/path/to/Test Vault/.obsidian/plugins/lumen-pdf-annotator" npm run dev
+LUMEN_PDF_ANNOTATOR_MOD_PLUGIN_DIR="/absolute/path/to/Test Vault/.obsidian/plugins/lumen-pdf-annotator-mod" npm run dev
 ```
 
 Do not point a development build at a production knowledge base. The watch build writes `main.js`, `manifest.json`, and `styles.css` to the configured folder.

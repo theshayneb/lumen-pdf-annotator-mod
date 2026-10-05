@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to Lumen PDF Annotator are documented here.
+All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
+
+## Mod 1.0.0 — 2026-10-05
+
+- Forked as a separate plugin, **Lumen PDF Annotator Mod** (`lumen-pdf-annotator-mod`). It has its own storage (`.lumen-pdf-mod/`), view type, link scheme (`obsidian://lumen-pdf-mod`), and CSS namespace, so it can't collide with the original. When the fork first opens a PDF, it copies that PDF's existing annotations from the original plugin's storage. It never writes to the original's storage.
+- Annotation inspector: the colour filter now shows a chip with a count for each colour, including imported colours. Click a chip again to clear the filter. Added a **Colour** sort option, and cards now show their colour name.
+- Sidecar Markdown export: writes `<PDF name>.md` next to the PDF from the inspector button or the **Export annotations to sidecar Markdown note** command. You can group it by page or by colour, and optionally keep it updated automatically. The export never overwrites notes it didn't create, and it keeps text written below its end marker.
 
 ## 1.0.19 — 2026-09-25
 

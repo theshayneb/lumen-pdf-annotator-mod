@@ -2,7 +2,7 @@ import { FileView, Menu, Notice, Platform, Scope, setIcon, TFile, WorkspaceLeaf 
 import type { PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { TextLayer } from "pdfjs-dist/types/src/display/text_layer";
 import { annotationMarkdownLink } from "./links";
-import { AnnotationIndex, MARK_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
+import { AnnotationIndex, colorName, compareColors, MARK_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
 import { annotationTarget, comparableFileName, QuoteAnnotationRecord, quoteAnnotations } from "./legacy";
 import { loadPdf } from "./pdf-runtime";
 import {
@@ -15,9 +15,10 @@ import {
   ResolvedOutlineEntry,
   resolvePdfOutline,
 } from "./outline";
+import { SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
 import { DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle } from "./storage";
 
-export const LUMEN_VIEW_TYPE = "lumen-pdf-view";
+export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
 export type PdfTheme = "light" | "sepia" | "dark";
 const CARD_HEIGHT = 132;
 const CARD_OVERSCAN = 5;
@@ -162,7 +163,7 @@ function errorName(error: unknown): string | undefined {
 
 function iconButton(icon: string, label: string, onClick: () => void): HTMLButtonElement {
   const button = createEl("button");
-  button.className = "lumen-icon-button";
+  button.className = "lumod-icon-button";
   button.setAttribute("aria-label", label);
   setIcon(button, icon);
   button.addEventListener("click", event => {
@@ -231,6 +232,13 @@ function markLabel(style: MarkStyle): string {
   return style;
 }
 
+export interface SidecarOptions {
+  grouping: SidecarGrouping;
+  autoSync: boolean;
+}
+
+const SIDECAR_SYNC_DELAY = 1_500;
+
 export class LumenPdfView extends FileView {
   private readonly mobileRuntime = Platform.isMobile;
   private pdfDocument: PDFDocumentProxy | null = null;
@@ -275,7 +283,14 @@ export class LumenPdfView extends FileView {
   private theme: PdfTheme;
   private activeFilter: "all" | "highlights" | "notes" = "all";
   private activeColor = "all";
-  private inspectorSort: "newest" | "oldest" | "page" = "newest";
+  private inspectorSort: "newest" | "oldest" | "page" | "color" = "newest";
+  private inspectorColorFilters!: HTMLElement;
+  private inspectorColorRevision = -1;
+  private sidecarTimer = 0;
+  // The PDF that `bundle` and `index` belong to. `this.file` already points at
+  // the next PDF while the previous one is being torn down.
+  private bundleFile: TFile | null = null;
+  private sidecarConflictReported = false;
   private selection: PendingSelection | null = null;
   private selectionPalette: HTMLElement | null = null;
   private suppressNextSelectionCapture = false;
@@ -330,6 +345,7 @@ export class LumenPdfView extends FileView {
     private readonly legacyAnnotationFolder = "PDF annotations",
     private readonly automaticPdfBackups = false,
     private readonly onReaderReady?: () => void,
+    private readonly sidecarOptions: () => SidecarOptions = () => ({ grouping: "page", autoSync: false }),
   ) {
     super(leaf);
     this.theme = initialTheme;
@@ -376,7 +392,7 @@ export class LumenPdfView extends FileView {
 
   async onOpen(): Promise<void> {
     this.contentEl.empty();
-    this.contentEl.addClass("lumen-host");
+    this.contentEl.addClass("lumod-host");
     if (!this.mobileRuntime) return;
     const doc = this.containerEl.ownerDocument;
     const viewWindow = doc.defaultView;
@@ -439,7 +455,10 @@ export class LumenPdfView extends FileView {
     const index = await indexPromise;
     if (generation !== this.documentGeneration) return;
     this.bundle = bundle;
+    this.bundleFile = file;
     this.index = index;
+    this.sidecarConflictReported = false;
+    bundle.repository.onChange = () => this.scheduleSidecarSync();
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
     this.refreshInspector();
     window.setTimeout(() => {
@@ -514,7 +533,7 @@ export class LumenPdfView extends FileView {
       window.cancelAnimationFrame(this.inspectorRaf);
       this.inspectorList.empty();
       this.inspectorList.scrollTop = 0;
-      this.inspector.querySelector(".lumen-inspector-detail")?.remove();
+      this.inspector.querySelector(".lumod-inspector-detail")?.remove();
     }
   }
 
@@ -578,6 +597,33 @@ export class LumenPdfView extends FileView {
     if (this.bundle) await this.bundle.repository.flushJournal();
   }
 
+  /** Write `<pdf name>.md` next to the PDF. */
+  async exportSidecar(): Promise<string | null> {
+    window.clearTimeout(this.sidecarTimer);
+    this.sidecarTimer = 0;
+    if (!this.bundle || !this.bundleFile) return null;
+    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping);
+  }
+
+  private scheduleSidecarSync(): void {
+    if (!this.sidecarOptions().autoSync) return;
+    window.clearTimeout(this.sidecarTimer);
+    this.sidecarTimer = window.setTimeout(() => void this.syncSidecar(), SIDECAR_SYNC_DELAY);
+  }
+
+  private async syncSidecar(): Promise<void> {
+    try {
+      await this.exportSidecar();
+    } catch (error) {
+      if (error instanceof SidecarConflictError) {
+        if (!this.sidecarConflictReported) new Notice(`Sidecar not updated: ${error.message}`, 8000);
+        this.sidecarConflictReported = true;
+      } else {
+        console.error("Lumen could not update the sidecar note", error);
+      }
+    }
+  }
+
   async exportAnnotations(): Promise<string | null> {
     if (!this.bundle || !this.file) return null;
     return this.bundle.repository.exportReadable(this.index, this.file.name);
@@ -585,17 +631,17 @@ export class LumenPdfView extends FileView {
 
   private buildShell(file: TFile): void {
     this.contentEl.empty();
-    this.rootEl = this.contentEl.createDiv({ cls: `lumen-reader theme-${this.theme}` });
+    this.rootEl = this.contentEl.createDiv({ cls: `lumod-reader theme-${this.theme}` });
     this.rootEl.classList.toggle("is-mobile", this.mobileRuntime);
     const appAccent = this.getAppAccentColor();
-    if (appAccent) this.rootEl.style.setProperty("--lumen-accent", appAccent);
-    this.rootEl.style.setProperty("--lumen-zoom", String(this.zoom));
-    this.toolbarEl = this.rootEl.createDiv({ cls: "lumen-toolbar" });
-    this.scrollEl = this.rootEl.createDiv({ cls: "lumen-scroll" });
-    this.pagesEl = this.scrollEl.createDiv({ cls: "lumen-pages" });
-    this.searchPanel = this.rootEl.createDiv({ cls: "lumen-search-panel" });
-    this.outlinePanel = this.rootEl.createDiv({ cls: "lumen-outline-panel" });
-    this.inspector = this.rootEl.createDiv({ cls: "lumen-inspector" });
+    if (appAccent) this.rootEl.style.setProperty("--lumod-accent", appAccent);
+    this.rootEl.style.setProperty("--lumod-zoom", String(this.zoom));
+    this.toolbarEl = this.rootEl.createDiv({ cls: "lumod-toolbar" });
+    this.scrollEl = this.rootEl.createDiv({ cls: "lumod-scroll" });
+    this.pagesEl = this.scrollEl.createDiv({ cls: "lumod-pages" });
+    this.searchPanel = this.rootEl.createDiv({ cls: "lumod-search-panel" });
+    this.outlinePanel = this.rootEl.createDiv({ cls: "lumod-outline-panel" });
+    this.inspector = this.rootEl.createDiv({ cls: "lumod-inspector" });
     this.buildToolbar(file);
     this.buildSearchPanel();
     this.buildOutlinePanel();
@@ -609,7 +655,7 @@ export class LumenPdfView extends FileView {
       }
       const state = this.pageStateFromEvent(event);
       if (!state) return;
-      const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumen-mark") : null;
+      const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumod-mark") : null;
       const annotation = mark?.dataset.annotationId ? this.index.get(mark.dataset.annotationId) : null;
       if (mark && annotation) {
         event.preventDefault();
@@ -636,7 +682,7 @@ export class LumenPdfView extends FileView {
       }
       const state = this.pageStateFromEvent(event);
       if (!state) return;
-      const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumen-mark") : null;
+      const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumod-mark") : null;
       const annotation = mark?.dataset.annotationId ? this.index.get(mark.dataset.annotationId) : null;
       if (annotation) {
         if (this.mobileRuntime) {
@@ -649,7 +695,7 @@ export class LumenPdfView extends FileView {
       } else this.openDenseAnnotationMenuAtPoint(event, state);
     });
     this.pagesEl.addEventListener("pointerdown", event => {
-      if (event.target instanceof Element && event.target.closest(".lumen-mark")) event.stopPropagation();
+      if (event.target instanceof Element && event.target.closest(".lumod-mark")) event.stopPropagation();
       if (this.mobileRuntime) this.beginMobileLongPress(event);
     });
     if (this.mobileRuntime) {
@@ -662,7 +708,7 @@ export class LumenPdfView extends FileView {
       }, { passive: true });
       this.pagesEl.addEventListener("keydown", event => {
         if (event.key !== "Enter" && event.key !== " ") return;
-        const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumen-mark") : null;
+        const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumod-mark") : null;
         const annotation = mark?.dataset.annotationId ? this.index.get(mark.dataset.annotationId) : null;
         if (!mark || !annotation) return;
         event.preventDefault();
@@ -691,7 +737,7 @@ export class LumenPdfView extends FileView {
         this.suppressNextSelectionCapture = true;
         this.closeSelectionPalette();
       }
-      if (this.editor && !this.editor.contains(target) && !(target as Element).closest?.(".lumen-mark")) this.closeEditor();
+      if (this.editor && !this.editor.contains(target) && !(target as Element).closest?.(".lumod-mark")) this.closeEditor();
     });
     if (this.mobileRuntime) {
       this.mobileLayoutWidth = this.rootEl.clientWidth;
@@ -702,11 +748,11 @@ export class LumenPdfView extends FileView {
   private buildToolbar(file: TFile): void {
     this.toolbarEl.setAttribute("aria-label", `${file.name} PDF controls`);
 
-    const pageGroup = this.toolbarEl.createDiv({ cls: "lumen-control-group lumen-page-group" });
+    const pageGroup = this.toolbarEl.createDiv({ cls: "lumod-control-group lumod-page-group" });
     pageGroup.append(iconButton("chevron-left", "Previous page", () => this.previousPage()));
-    const pageIndicator = pageGroup.createDiv({ cls: "lumen-page-indicator" });
+    const pageIndicator = pageGroup.createDiv({ cls: "lumod-page-indicator" });
     const pageInput = pageIndicator.createEl("input", {
-      cls: "lumen-page-input",
+      cls: "lumod-page-input",
       attr: { type: "number", min: "1", value: "1", "aria-label": "Page number" },
     });
     pageInput.addEventListener("change", () => this.goToPage(Number(pageInput.value)));
@@ -717,21 +763,21 @@ export class LumenPdfView extends FileView {
       this.goToPage(Number(pageInput.value));
       pageInput.blur();
     });
-    pageIndicator.createSpan({ cls: "lumen-page-separator", text: "/" });
-    const pageTotal = pageIndicator.createSpan({ cls: "lumen-page-total", text: "–" });
+    pageIndicator.createSpan({ cls: "lumod-page-separator", text: "/" });
+    const pageTotal = pageIndicator.createSpan({ cls: "lumod-page-total", text: "–" });
     pageGroup.append(iconButton("chevron-right", "Next page", () => this.nextPage()));
 
-    const zoomGroup = this.toolbarEl.createDiv({ cls: "lumen-control-group lumen-zoom-group" });
+    const zoomGroup = this.toolbarEl.createDiv({ cls: "lumod-control-group lumod-zoom-group" });
     zoomGroup.append(iconButton("minus", "Zoom out", () => this.zoomOut()));
-    const zoomLabel = zoomGroup.createSpan({ cls: "lumen-zoom-label", text: "125%" });
+    const zoomLabel = zoomGroup.createSpan({ cls: "lumod-zoom-label", text: "125%" });
     zoomGroup.append(iconButton("plus", "Zoom in", () => this.zoomIn()));
 
-    const actions = this.toolbarEl.createDiv({ cls: "lumen-toolbar-actions" });
+    const actions = this.toolbarEl.createDiv({ cls: "lumod-toolbar-actions" });
     actions.append(iconButton("search", "Search PDF", () => this.toggleSearch()));
     this.outlineButton = iconButton("list-tree", "Table of contents", () => this.toggleOutline());
     this.outlineButton.removeAttribute("aria-label");
-    this.outlineButton.createSpan({ cls: "lumen-visually-hidden", text: "Table of contents" });
-    this.outlineButton.addClass("lumen-outline-button");
+    this.outlineButton.createSpan({ cls: "lumod-visually-hidden", text: "Table of contents" });
+    this.outlineButton.addClass("lumod-outline-button");
     this.outlineButton.hidden = true;
     this.outlineButton.setAttribute("aria-pressed", "false");
     actions.append(this.outlineButton);
@@ -740,7 +786,7 @@ export class LumenPdfView extends FileView {
     this.pageNoteButton.setAttribute("aria-pressed", "false");
     actions.append(this.pageNoteButton);
     this.themeButton = iconButton(this.theme === "light" ? "sun" : this.theme === "sepia" ? "coffee" : "moon", `PDF theme: ${this.theme}`, () => this.showThemeMenu());
-    this.themeButton.addClass("lumen-theme-button");
+    this.themeButton.addClass("lumod-theme-button");
     this.themeButton.dataset.theme = this.theme;
     actions.append(this.themeButton);
 
@@ -750,13 +796,13 @@ export class LumenPdfView extends FileView {
   }
 
   private buildSearchPanel(): void {
-    const header = this.searchPanel.createDiv({ cls: "lumen-panel-header" });
+    const header = this.searchPanel.createDiv({ cls: "lumod-panel-header" });
     header.createSpan({ text: "Find in PDF" });
     header.append(iconButton("x", "Close PDF search", () => this.toggleSearch()));
-    const inputWrap = this.searchPanel.createDiv({ cls: "lumen-search-input-wrap" });
+    const inputWrap = this.searchPanel.createDiv({ cls: "lumod-search-input-wrap" });
     setIcon(inputWrap.createSpan(), "search");
     this.searchInput = inputWrap.createEl("input", { attr: { type: "search", placeholder: "Search this PDF", "aria-label": "Search this PDF" } });
-    this.searchResults = this.searchPanel.createDiv({ cls: "lumen-search-results" });
+    this.searchResults = this.searchPanel.createDiv({ cls: "lumod-search-results" });
     let timer = 0;
     this.searchInput.addEventListener("input", () => {
       window.clearTimeout(timer);
@@ -765,23 +811,23 @@ export class LumenPdfView extends FileView {
   }
 
   private buildOutlinePanel(): void {
-    const headingId = `lumen-outline-heading-${++outlineHeadingSequence}`;
+    const headingId = `lumod-outline-heading-${++outlineHeadingSequence}`;
     this.outlinePanel.setAttribute("role", "region");
     this.outlinePanel.setAttribute("aria-labelledby", headingId);
-    const header = this.outlinePanel.createDiv({ cls: "lumen-panel-header" });
+    const header = this.outlinePanel.createDiv({ cls: "lumod-panel-header" });
     header.createSpan({ text: "Table of contents", attr: { id: headingId } });
     const close = iconButton("x", "Close table of contents", () => this.toggleOutline());
     close.removeAttribute("aria-label");
-    close.createSpan({ cls: "lumen-visually-hidden", text: "Close table of contents" });
+    close.createSpan({ cls: "lumod-visually-hidden", text: "Close table of contents" });
     header.append(close);
-    const inputWrap = this.outlinePanel.createDiv({ cls: "lumen-search-input-wrap" });
+    const inputWrap = this.outlinePanel.createDiv({ cls: "lumod-search-input-wrap" });
     setIcon(inputWrap.createSpan(), "search");
-    const label = inputWrap.createEl("label", { cls: "lumen-outline-search-label" });
-    label.createSpan({ cls: "lumen-visually-hidden", text: "Filter table of contents" });
+    const label = inputWrap.createEl("label", { cls: "lumod-outline-search-label" });
+    label.createSpan({ cls: "lumod-visually-hidden", text: "Filter table of contents" });
     this.outlineInput = label.createEl("input", {
       attr: { type: "search", placeholder: "Filter headings" },
     });
-    this.outlineList = this.outlinePanel.createDiv({ cls: "lumen-outline-list", attr: { role: "tree" } });
+    this.outlineList = this.outlinePanel.createDiv({ cls: "lumod-outline-list", attr: { role: "tree" } });
     this.outlineInput.addEventListener("input", () => {
       window.clearTimeout(this.outlineFilterTimer);
       this.outlineFilterTimer = window.setTimeout(() => this.renderOutline(), 100);
@@ -798,7 +844,7 @@ export class LumenPdfView extends FileView {
       if (generation !== this.documentGeneration || document !== this.pdfDocument) return;
       if (this.outlineButton) {
         this.outlineButton.hidden = this.outlineEntries.length === 0;
-        const name = this.outlineButton.querySelector<HTMLElement>(".lumen-visually-hidden");
+        const name = this.outlineButton.querySelector<HTMLElement>(".lumod-visually-hidden");
         if (name) name.textContent = `Table of contents, ${this.outlineEntries.length} headings`;
       }
       if (this.outlineEntries.length) void this.refineOutlineEntries(generation);
@@ -887,7 +933,7 @@ export class LumenPdfView extends FileView {
     this.outlineItemById.clear();
     const entries = filterOutlineEntries(this.outlineEntries, this.outlineInput?.value ?? "");
     if (!entries.length) {
-      this.outlineList.createDiv({ cls: "lumen-empty", text: "No matching headings" });
+      this.outlineList.createDiv({ cls: "lumod-empty", text: "No matching headings" });
       return;
     }
     const fragment = createFragment();
@@ -895,7 +941,7 @@ export class LumenPdfView extends FileView {
     this.activeOutlineId = activeId;
     for (const entry of entries) {
       const button = fragment.createEl("button", {
-        cls: "lumen-outline-item",
+        cls: "lumod-outline-item",
         attr: {
           role: "treeitem",
           "aria-level": String(entry.depth + 1),
@@ -906,10 +952,10 @@ export class LumenPdfView extends FileView {
         button.addClass("is-current");
         button.setAttribute("aria-current", "location");
       }
-      button.style.setProperty("--lumen-outline-indent", `${Math.min(entry.depth, 12) * 14}px`);
-      button.createSpan({ cls: "lumen-outline-title", text: entry.title });
+      button.style.setProperty("--lumod-outline-indent", `${Math.min(entry.depth, 12) * 14}px`);
+      button.createSpan({ cls: "lumod-outline-title", text: entry.title });
       button.createSpan({
-        cls: "lumen-outline-page",
+        cls: "lumod-outline-page",
         text: `p. ${entry.pageNumber}`,
       });
       button.addEventListener("click", () => void this.navigateToOutlineEntry(entry));
@@ -1013,11 +1059,21 @@ export class LumenPdfView extends FileView {
   }
 
   private buildInspector(): void {
-    const header = this.inspector.createDiv({ cls: "lumen-panel-header" });
+    const header = this.inspector.createDiv({ cls: "lumod-panel-header" });
     header.createSpan({ text: "Annotations" });
-    this.annotationCount = header.createSpan({ cls: "lumen-count", text: "0" });
+    this.annotationCount = header.createSpan({ cls: "lumod-count", text: "0" });
+    const sidecarButton = iconButton("file-down", "Export to sidecar Markdown note", () => {
+      void this.exportSidecar().then(path => {
+        if (path) new Notice(`Annotations exported to ${path}`);
+      }).catch(error => {
+        console.error("Lumen could not export the sidecar note", error);
+        new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);
+      });
+    });
+    sidecarButton.addClass("lumod-sidecar-button");
+    header.append(sidecarButton);
     header.append(iconButton("x", "Close annotations", () => this.toggleInspector()));
-    const inputWrap = this.inspector.createDiv({ cls: "lumen-search-input-wrap" });
+    const inputWrap = this.inspector.createDiv({ cls: "lumod-search-input-wrap" });
     setIcon(inputWrap.createSpan(), "search");
     this.inspectorQuery = inputWrap.createEl("input", { attr: { type: "search", placeholder: "Search annotations", "aria-label": "Search annotations" } });
     if (this.mobileRuntime) {
@@ -1035,7 +1091,7 @@ export class LumenPdfView extends FileView {
       window.clearTimeout(queryTimer);
       queryTimer = window.setTimeout(() => this.refreshInspector(), 120);
     });
-    const filters = this.inspector.createDiv({ cls: "lumen-filter-row" });
+    const filters = this.inspector.createDiv({ cls: "lumod-filter-row" });
     for (const [value, label] of [["all", "All"], ["highlights", "Highlights"], ["notes", "Notes"]] as const) {
       const button = filters.createEl("button", { text: label });
       button.classList.toggle("is-active", value === "all");
@@ -1045,39 +1101,58 @@ export class LumenPdfView extends FileView {
         this.refreshInspector();
       });
     }
-    const options = this.inspector.createDiv({ cls: "lumen-inspector-options" });
-    const colorFilters = options.createDiv({ cls: "lumen-inspector-colors", attr: { "aria-label": "Filter annotations by colour" } });
-    const allColors = colorFilters.createEl("button", { cls: "lumen-all-colors is-active", text: "All", attr: { "aria-label": "Show all colours" } });
-    const colorButtons: HTMLButtonElement[] = [allColors];
-    allColors.addEventListener("click", () => {
-      this.activeColor = "all";
-      colorButtons.forEach(button => button.classList.toggle("is-active", button === allColors));
-      this.refreshInspector();
-    });
-    for (const color of MARK_COLORS) {
-      const button = colorFilters.createEl("button", { cls: "lumen-color-chip", attr: { "aria-label": `Show ${color} annotations` } });
-      button.style.setProperty("--mark-color", color);
-      button.addEventListener("click", () => {
-        this.activeColor = color;
-        colorButtons.forEach(item => item.classList.toggle("is-active", item === button));
-        this.refreshInspector();
-      });
-      colorButtons.push(button);
-    }
-    const sort = options.createEl("select", { cls: "lumen-inspector-sort", attr: { "aria-label": "Sort annotations" } });
+    const options = this.inspector.createDiv({ cls: "lumod-inspector-options" });
+    this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by colour" } });
+    const sort = options.createEl("select", { cls: "lumod-inspector-sort", attr: { "aria-label": "Sort annotations" } });
     sort.createEl("option", { value: "newest", text: "Newest" });
     sort.createEl("option", { value: "oldest", text: "Oldest" });
     sort.createEl("option", { value: "page", text: "Page" });
+    sort.createEl("option", { value: "color", text: "Colour" });
     sort.value = this.inspectorSort;
     sort.addEventListener("change", () => {
       this.inspectorSort = sort.value as typeof this.inspectorSort;
       this.refreshInspector();
     });
-    this.inspectorList = this.inspector.createDiv({ cls: "lumen-inspector-list" });
+    this.inspectorList = this.inspector.createDiv({ cls: "lumod-inspector-list" });
     this.inspectorList.addEventListener("scroll", () => {
       window.cancelAnimationFrame(this.inspectorRaf);
       this.inspectorRaf = window.requestAnimationFrame(() => this.renderInspectorWindow());
     }, { passive: true });
+  }
+
+  /** Colour chips with live counts: the palette, plus any imported colours in use. */
+  private renderInspectorColorFilters(): void {
+    if (!this.inspectorColorFilters || this.inspectorColorRevision === this.index.version) return;
+    this.inspectorColorRevision = this.index.version;
+    const counts = new Map<string, number>();
+    for (const item of this.index.logicalAll()) counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
+    const colors = Array.from(new Set<string>([...MARK_COLORS, ...counts.keys()])).sort(compareColors);
+    if (this.activeColor !== "all" && !colors.includes(this.activeColor)) this.activeColor = "all";
+    this.inspectorColorFilters.empty();
+    const allColors = this.inspectorColorFilters.createEl("button", { cls: "lumod-all-colors", text: "All", attr: { "aria-label": "Show all colours" } });
+    allColors.classList.toggle("is-active", this.activeColor === "all");
+    allColors.addEventListener("click", () => this.setInspectorColor("all"));
+    for (const color of colors) {
+      const count = counts.get(color) ?? 0;
+      const name = colorName(color);
+      const button = this.inspectorColorFilters.createEl("button", {
+        cls: "lumod-color-filter",
+        attr: { "aria-label": `Show ${name} annotations (${count})`, title: `${name} · ${count}` },
+      });
+      button.style.setProperty("--mark-color", color);
+      button.classList.toggle("is-active", this.activeColor === color);
+      button.classList.toggle("is-empty", count === 0);
+      button.createSpan({ cls: "lumod-color-filter-swatch" });
+      button.createSpan({ cls: "lumod-color-filter-count", text: String(count) });
+      button.addEventListener("click", () => this.setInspectorColor(this.activeColor === color ? "all" : color));
+    }
+  }
+
+  private setInspectorColor(color: string): void {
+    this.activeColor = color;
+    this.inspectorColorRevision = -1;
+    this.renderInspectorColorFilters();
+    this.refreshInspector();
   }
 
   private async buildPages(generation: number): Promise<void> {
@@ -1089,11 +1164,11 @@ export class LumenPdfView extends FileView {
     this.baselineHeight = firstViewport.height;
     if (this.mobileRuntime && this.mobileFitMode) {
       this.zoom = this.mobileFitZoom();
-      this.rootEl.style.setProperty("--lumen-zoom", String(this.zoom));
+      this.rootEl.style.setProperty("--lumod-zoom", String(this.zoom));
       this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`;
     }
-    this.pagesEl.style.setProperty("--lumen-page-width", `${this.baselineWidth}px`);
-    this.pagesEl.style.setProperty("--lumen-page-height", `${this.baselineHeight}px`);
+    this.pagesEl.style.setProperty("--lumod-page-width", `${this.baselineWidth}px`);
+    this.pagesEl.style.setProperty("--lumod-page-height", `${this.baselineHeight}px`);
     const pageCount = this.pdfDocument.numPages;
     this.pageTotal.textContent = String(pageCount);
     this.observer = new IntersectionObserver(entries => {
@@ -1124,7 +1199,7 @@ export class LumenPdfView extends FileView {
     const batch: HTMLElement[] = [];
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
       if (generation !== this.documentGeneration) return;
-      const shell = createDiv({ cls: "lumen-page" });
+      const shell = createDiv({ cls: "lumod-page" });
       shell.dataset.page = String(pageNumber);
       const state: PageState = {
         pageNumber, shell, stage: null, canvasHost: null, searchHost: null, textHost: null, markHost: null,
@@ -1147,23 +1222,23 @@ export class LumenPdfView extends FileView {
   }
 
   private sizePage(state: PageState, width: number, height: number): void {
-    state.shell.style.setProperty("--lumen-page-width", `${width}px`);
-    state.shell.style.setProperty("--lumen-page-height", `${height}px`);
+    state.shell.style.setProperty("--lumod-page-width", `${width}px`);
+    state.shell.style.setProperty("--lumod-page-height", `${height}px`);
   }
 
   private pageStateFromEvent(event: Event): PageState | null {
     const target = event.target instanceof Element ? event.target : null;
-    const shell = target?.closest<HTMLElement>(".lumen-page");
+    const shell = target?.closest<HTMLElement>(".lumod-page");
     return shell ? this.pages.get(Number(shell.dataset.page)) ?? null : null;
   }
 
   private ensurePageLayers(state: PageState): void {
     if (state.stage) return;
-    state.stage = state.shell.createDiv({ cls: "lumen-page-stage" });
-    state.canvasHost = state.stage.createDiv({ cls: "lumen-canvas-layer" });
-    state.searchHost = state.stage.createDiv({ cls: "lumen-search-layer" });
-    state.textHost = state.stage.createDiv({ cls: "lumen-text-layer" });
-    state.markHost = state.stage.createDiv({ cls: "lumen-mark-layer" });
+    state.stage = state.shell.createDiv({ cls: "lumod-page-stage" });
+    state.canvasHost = state.stage.createDiv({ cls: "lumod-canvas-layer" });
+    state.searchHost = state.stage.createDiv({ cls: "lumod-search-layer" });
+    state.textHost = state.stage.createDiv({ cls: "lumod-text-layer" });
+    state.markHost = state.stage.createDiv({ cls: "lumod-mark-layer" });
   }
 
   private releasePageLayers(state: PageState): void {
@@ -1453,7 +1528,7 @@ export class LumenPdfView extends FileView {
     if (this.mobileRuntime && !preserveMobileFit) this.mobileFitMode = false;
     const rounded = this.mobileRuntime ? Math.round(value * 20) / 20 : Math.round(value * 4) / 4;
     this.zoom = clamp(rounded, this.minimumZoom(), 4);
-    this.rootEl.style.setProperty("--lumen-zoom", String(this.zoom));
+    this.rootEl.style.setProperty("--lumod-zoom", String(this.zoom));
     this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`;
     for (const state of Array.from(this.mountedPages)) {
       this.cancelPageRender(state);
@@ -1480,7 +1555,7 @@ export class LumenPdfView extends FileView {
     const changed = this.theme !== theme;
     this.theme = theme;
     const appAccent = this.getAppAccentColor();
-    if (appAccent) this.rootEl.style.setProperty("--lumen-accent", appAccent);
+    if (appAccent) this.rootEl.style.setProperty("--lumod-accent", appAccent);
     this.rootEl.classList.remove("theme-light", "theme-sepia", "theme-dark");
     this.rootEl.classList.add(`theme-${theme}`);
     if (this.themeButton) {
@@ -1498,7 +1573,7 @@ export class LumenPdfView extends FileView {
     surface.classList.remove("theme-light", "theme-sepia", "theme-dark");
     surface.classList.add(`theme-${this.theme}`);
     const appAccent = this.getAppAccentColor();
-    if (appAccent) surface.style.setProperty("--lumen-accent", appAccent);
+    if (appAccent) surface.style.setProperty("--lumod-accent", appAccent);
   }
 
   private detachedDocument(): Document {
@@ -1514,11 +1589,11 @@ export class LumenPdfView extends FileView {
 
   private updateDetachedMobileSurface(surface: HTMLElement): void {
     for (const property of [
-      "--lumen-mobile-viewport-top",
-      "--lumen-mobile-viewport-center",
-      "--lumen-mobile-viewport-height",
-      "--lumen-mobile-keyboard-offset",
-      "--lumen-mobile-keyboard-extra-height",
+      "--lumod-mobile-viewport-top",
+      "--lumod-mobile-viewport-center",
+      "--lumod-mobile-viewport-height",
+      "--lumod-mobile-keyboard-offset",
+      "--lumod-mobile-keyboard-extra-height",
     ]) {
       const value = this.rootEl?.style.getPropertyValue(property);
       if (value) surface.style.setProperty(property, value);
@@ -1572,7 +1647,7 @@ export class LumenPdfView extends FileView {
       this.mobileViewportBaselineWidth = viewportWidth;
       this.mobileViewportBaselineHeight = reportedViewportHeight;
       this.mobilePanelHeight = 0;
-      this.rootEl.style.removeProperty("--lumen-mobile-panel-height");
+      this.rootEl.style.removeProperty("--lumod-mobile-panel-height");
     } else {
       this.mobileViewportBaselineHeight = Math.max(this.mobileViewportBaselineHeight, reportedViewportHeight);
     }
@@ -1602,7 +1677,7 @@ export class LumenPdfView extends FileView {
       const measured = Number.parseFloat(getComputedStyle(this.searchPanel).height);
       if (measured > 0) {
         this.mobilePanelHeight = measured;
-        this.rootEl.style.setProperty("--lumen-mobile-panel-height", `${Math.round(measured)}px`);
+        this.rootEl.style.setProperty("--lumod-mobile-panel-height", `${Math.round(measured)}px`);
       }
     }
     const layoutHeight = Math.max(viewWindow?.innerHeight ?? 0, doc.documentElement.clientHeight, rootRect.bottom);
@@ -1613,18 +1688,18 @@ export class LumenPdfView extends FileView {
     // When the host already remains full-height (overlay keyboards), this is
     // zero and the existing geometry is untouched.
     const previousKeyboardExtra = Number.parseFloat(
-      this.rootEl.style.getPropertyValue("--lumen-mobile-keyboard-extra-height"),
+      this.rootEl.style.getPropertyValue("--lumod-mobile-keyboard-extra-height"),
     ) || 0;
     const hostCollapsedForKeyboard = keyboardOpen && (previousKeyboardExtra > 0 || (rootRect.height > 0
       && layoutHeight - rootRect.height >= 100));
     const keyboardExtraHeight = hostCollapsedForKeyboard ? keyboardOffset : 0;
     const viewportCenter = viewportTop + viewportHeight / 2;
     this.rootEl.classList.toggle("has-mobile-keyboard", keyboardOpen);
-    this.rootEl.style.setProperty("--lumen-mobile-viewport-top", `${Math.round(viewportTop)}px`);
-    this.rootEl.style.setProperty("--lumen-mobile-viewport-center", `${Math.round(viewportCenter)}px`);
-    this.rootEl.style.setProperty("--lumen-mobile-viewport-height", `${Math.round(viewportHeight)}px`);
-    this.rootEl.style.setProperty("--lumen-mobile-keyboard-offset", `${Math.round(keyboardOffset)}px`);
-    this.rootEl.style.setProperty("--lumen-mobile-keyboard-extra-height", `${Math.round(keyboardExtraHeight)}px`);
+    this.rootEl.style.setProperty("--lumod-mobile-viewport-top", `${Math.round(viewportTop)}px`);
+    this.rootEl.style.setProperty("--lumod-mobile-viewport-center", `${Math.round(viewportCenter)}px`);
+    this.rootEl.style.setProperty("--lumod-mobile-viewport-height", `${Math.round(viewportHeight)}px`);
+    this.rootEl.style.setProperty("--lumod-mobile-keyboard-offset", `${Math.round(keyboardOffset)}px`);
+    this.rootEl.style.setProperty("--lumod-mobile-keyboard-extra-height", `${Math.round(keyboardExtraHeight)}px`);
     this.updateDetachedMobileSurface(this.selectionPalette ?? this.editor ?? this.rootEl);
     if (this.selectionPalette && this.editor) this.updateDetachedMobileSurface(this.editor);
     this.editor?.classList.toggle("has-mobile-keyboard", keyboardOpen);
@@ -1636,7 +1711,7 @@ export class LumenPdfView extends FileView {
     const doc = this.containerEl.ownerDocument;
     const active = doc.activeElement;
     if (!(active instanceof HTMLElement)) return;
-    const scroller = active.closest<HTMLElement>(".lumen-mark-editor.is-mobile-surface, .lumen-inspector-detail");
+    const scroller = active.closest<HTMLElement>(".lumod-mark-editor.is-mobile-surface, .lumod-inspector-detail");
     if (!scroller) return;
     const controlRect = active.getBoundingClientRect();
     const scrollerRect = scroller.getBoundingClientRect();
@@ -1701,7 +1776,7 @@ export class LumenPdfView extends FileView {
     } catch (clipboardError) {
       const input = doc.body.createEl("textarea", { attr: { "aria-hidden": "true" } });
       input.value = value;
-      input.addClass("lumen-clipboard-proxy");
+      input.addClass("lumod-clipboard-proxy");
       input.select();
       input.setSelectionRange(0, input.value.length);
       // execCommand remains the only synchronous copy fallback in older
@@ -1717,7 +1792,7 @@ export class LumenPdfView extends FileView {
     // Reading a custom property returns its unresolved var() expression. Resolve
     // it on a neutral probe before PDF theme classes can replace its HSL inputs.
     const doc = this.mobileRuntime ? this.containerEl.ownerDocument : document;
-    const probe = doc.body.createSpan({ cls: "lumen-accent-probe" });
+    const probe = doc.body.createSpan({ cls: "lumod-accent-probe" });
     probe.setCssProps({ color: "var(--interactive-accent)" });
     const accent = this.mobileRuntime
       ? doc.defaultView?.getComputedStyle(probe).color ?? ""
@@ -1888,8 +1963,8 @@ export class LumenPdfView extends FileView {
     return Boolean(start && end
       && this.pagesEl.contains(start)
       && this.pagesEl.contains(end)
-      && start.closest(".lumen-text-layer")
-      && end.closest(".lumen-text-layer"));
+      && start.closest(".lumod-text-layer")
+      && end.closest(".lumod-text-layer"));
   }
 
   private scheduleMobileSelectionCapture(clientX?: number, clientY?: number, delay = 170): void {
@@ -1994,7 +2069,7 @@ export class LumenPdfView extends FileView {
     const pendingSelection = this.selection;
     this.selectionPalette?.remove();
     this.selectionPalette = null;
-    const palette = this.detachedDocument().body.createDiv({ cls: "lumen-selection-palette" });
+    const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette" });
     this.prepareDetachedSurface(palette);
     if (this.mobileRuntime) {
       palette.setAttribute("role", "toolbar");
@@ -2003,9 +2078,9 @@ export class LumenPdfView extends FileView {
     this.selectionPalette = palette;
     let pendingColor: string = MARK_COLORS[0];
     const colorChips: HTMLButtonElement[] = [];
-    const colors = palette.createDiv({ cls: "lumen-color-row" });
+    const colors = palette.createDiv({ cls: "lumod-color-row" });
     for (const color of MARK_COLORS) {
-      const chip = colors.createEl("button", { cls: "lumen-color-chip", attr: { "aria-label": `Choose ${color}` } });
+      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Choose ${color}` } });
       chip.dataset.color = color;
       chip.style.setProperty("--mark-color", color);
       chip.classList.toggle("is-active", color === pendingColor);
@@ -2021,13 +2096,13 @@ export class LumenPdfView extends FileView {
       });
       colorChips.push(chip);
     }
-    const styles = palette.createDiv({ cls: "lumen-style-row lumen-selection-styles" });
+    const styles = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
     for (const [style, icon] of [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const) {
       styles.append(iconButton(icon, `Apply ${markLabel(style)}`, () => {
         this.commitSelection(style, pendingColor, style === "comment");
       }));
     }
-    const actions = palette.createDiv({ cls: "lumen-palette-actions" });
+    const actions = palette.createDiv({ cls: "lumod-palette-actions" });
     actions.append(iconButton("copy", "Copy selected text", () => {
       void this.writeClipboard(pendingSelection.quote);
       this.closeSelectionPalette();
@@ -2042,20 +2117,20 @@ export class LumenPdfView extends FileView {
     if (!this.selection || !this.extensionGroupId) return;
     const pendingSelection = this.selection;
     this.selectionPalette?.remove();
-    const palette = this.detachedDocument().body.createDiv({ cls: "lumen-selection-palette lumen-extension-palette" });
+    const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-extension-palette" });
     this.prepareDetachedSurface(palette);
     if (this.mobileRuntime) {
       palette.setAttribute("role", "dialog");
       palette.setAttribute("aria-label", "Extend annotation");
     }
     this.selectionPalette = palette;
-    const controls = palette.createDiv({ cls: "lumen-extension-controls" });
-    controls.createSpan({ cls: "lumen-extension-label", text: "Extend annotation" });
-    const actions = controls.createDiv({ cls: "lumen-palette-actions" });
+    const controls = palette.createDiv({ cls: "lumod-extension-controls" });
+    controls.createSpan({ cls: "lumod-extension-label", text: "Extend annotation" });
+    const actions = controls.createDiv({ cls: "lumod-palette-actions" });
     actions.append(iconButton("check", "Apply extension", () => this.commitExtension()));
     actions.append(iconButton("x", "Cancel extension", () => this.cancelExtension()));
     palette.createDiv({
-      cls: "lumen-extension-preview",
+      cls: "lumod-extension-preview",
       text: pendingSelection.quote,
       attr: { "aria-label": "Selected text preview", role: "status" },
     });
@@ -2186,7 +2261,7 @@ export class LumenPdfView extends FileView {
     for (const annotation of annotations) {
       for (let rectIndex = 0; rectIndex < annotation.rects.length; rectIndex++) {
         const rect = annotation.rects[rectIndex];
-        const mark = markHost.createDiv({ cls: `lumen-mark style-${annotation.style}` });
+        const mark = markHost.createDiv({ cls: `lumod-mark style-${annotation.style}` });
         if (annotation.kind === "page-note") {
           mark.addClass("is-page-note");
           mark.setAttribute("aria-label", `Page ${annotation.page} note`);
@@ -2213,7 +2288,7 @@ export class LumenPdfView extends FileView {
     if (!state.stage || !state.markHost) return;
     const width = Math.max(1, state.stage.clientWidth);
     const height = Math.max(1, state.stage.clientHeight);
-    const canvas = state.markHost.createEl("canvas", { cls: "lumen-dense-mark-canvas" });
+    const canvas = state.markHost.createEl("canvas", { cls: "lumod-dense-mark-canvas" });
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const desiredPixels = width * height * dpr * dpr;
     const markCanvasPixelLimit = this.mobileRuntime ? MOBILE_MAX_MARK_CANVAS_PIXELS : MAX_MARK_CANVAS_PIXELS;
@@ -2417,7 +2492,7 @@ export class LumenPdfView extends FileView {
     if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0) return;
     const state = this.pageStateFromEvent(event);
     if (!state) return;
-    const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumen-mark") : null;
+    const mark = event.target instanceof Element ? event.target.closest<HTMLElement>(".lumod-mark") : null;
     const annotation = mark?.dataset.annotationId
       ? this.index.get(mark.dataset.annotationId)
       : this.denseAnnotationAtPoint(event, state);
@@ -2481,7 +2556,7 @@ export class LumenPdfView extends FileView {
     if (this.extensionGroupId) this.finishExtension();
     this.closeSelectionPalette();
     this.closeEditor();
-    const editor = this.detachedDocument().body.createDiv({ cls: `lumen-mark-editor theme-${this.theme}` });
+    const editor = this.detachedDocument().body.createDiv({ cls: `lumod-mark-editor theme-${this.theme}` });
     this.prepareDetachedSurface(editor);
     if (this.mobileRuntime) {
       editor.setAttribute("role", "dialog");
@@ -2489,7 +2564,7 @@ export class LumenPdfView extends FileView {
       editor.tabIndex = -1;
     }
     this.editor = editor;
-    const heading = editor.createDiv({ cls: "lumen-editor-heading" });
+    const heading = editor.createDiv({ cls: "lumod-editor-heading" });
     heading.createSpan({ text: this.annotationPageLabel(annotation, "Page ") });
     heading.append(iconButton("x", "Close editor", () => this.closeEditor()));
     this.populateEditor(editor, annotation, true);
@@ -2503,41 +2578,41 @@ export class LumenPdfView extends FileView {
   }
 
   private populateEditor(container: HTMLElement, annotation: PdfAnnotation, compact: boolean): void {
-    const colors = container.createDiv({ cls: "lumen-color-row" });
+    const colors = container.createDiv({ cls: "lumod-color-row" });
     for (const color of MARK_COLORS) {
-      const chip = colors.createEl("button", { cls: "lumen-color-chip", attr: { "aria-label": `Use ${color}` } });
+      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Use ${color}` } });
       chip.style.setProperty("--mark-color", color);
       chip.classList.toggle("is-active", annotation.color === color);
       chip.addEventListener("click", () => {
         this.mutateAnnotation(annotation.id, { color });
-        colors.querySelectorAll(".lumen-color-chip").forEach(item => item.classList.toggle("is-active", item === chip));
+        colors.querySelectorAll(".lumod-color-chip").forEach(item => item.classList.toggle("is-active", item === chip));
       });
     }
     if (annotation.kind !== "page-note") {
-      const styles = container.createDiv({ cls: "lumen-style-row" });
+      const styles = container.createDiv({ cls: "lumod-style-row" });
       for (const [style, icon] of [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const) {
         const button = iconButton(icon, markLabel(style), () => {
           this.mutateAnnotation(annotation.id, { style });
-          styles.querySelectorAll(".lumen-icon-button").forEach(item => item.classList.toggle("is-active", item === button));
+          styles.querySelectorAll(".lumod-icon-button").forEach(item => item.classList.toggle("is-active", item === button));
         });
         button.classList.toggle("is-active", annotation.style === style);
         styles.append(button);
       }
     }
     if (annotation.kind !== "page-note") {
-      const quote = container.createDiv({ cls: "lumen-editor-quote", text: annotation.quote });
+      const quote = container.createDiv({ cls: "lumod-editor-quote", text: annotation.quote });
       if (compact) quote.classList.add("is-compact");
     }
-    const note = container.createEl("textarea", { cls: "lumen-note-input", attr: { placeholder: annotation.kind === "page-note" ? "Page note…" : "Add a note…", "aria-label": annotation.kind === "page-note" ? "Page note" : "Annotation note" } });
+    const note = container.createEl("textarea", { cls: "lumod-note-input", attr: { placeholder: annotation.kind === "page-note" ? "Page note…" : "Add a note…", "aria-label": annotation.kind === "page-note" ? "Page note" : "Annotation note" } });
     note.value = annotation.note;
-    const tags = container.createEl("input", { cls: "lumen-tags-input", attr: { placeholder: "Tags, separated by commas", "aria-label": "Annotation tags" } });
+    const tags = container.createEl("input", { cls: "lumod-tags-input", attr: { placeholder: "Tags, separated by commas", "aria-label": "Annotation tags" } });
     tags.value = annotation.tags.join(", ");
     const save = () => {
       this.mutateAnnotation(annotation.id, { note: note.value, tags: parseTags(tags.value) }, false, false);
     };
     note.addEventListener("input", save);
     tags.addEventListener("input", save);
-    const actions = container.createDiv({ cls: "lumen-editor-actions" });
+    const actions = container.createDiv({ cls: "lumod-editor-actions" });
     actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
     if (annotation.kind !== "page-note") {
       actions.append(iconButton("scan-text", "Extend annotation", () => this.beginExtension(annotation)));
@@ -2587,7 +2662,7 @@ export class LumenPdfView extends FileView {
     }
     for (const page of pages) this.renderMarks(page);
     this.closeEditor();
-    this.inspector.querySelector(".lumen-inspector-detail")?.remove();
+    this.inspector.querySelector(".lumod-inspector-detail")?.remove();
     this.refreshInspector();
   }
 
@@ -2607,6 +2682,7 @@ export class LumenPdfView extends FileView {
       });
     if (this.inspectorSort === "newest") this.inspectorCache.reverse();
     else if (this.inspectorSort === "page") this.inspectorCache.sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
+    else if (this.inspectorSort === "color") this.inspectorCache.sort((a, b) => compareColors(a.color, b.color) || a.page - b.page || a.createdAt - b.createdAt);
     this.inspectorCacheRevision = this.index.version;
     this.inspectorCacheKey = key;
     return this.inspectorCache;
@@ -2617,6 +2693,7 @@ export class LumenPdfView extends FileView {
     return this.activeFilter === "all"
       && this.activeColor === "all"
       && this.inspectorSort !== "page"
+      && this.inspectorSort !== "color"
       && !query;
   }
 
@@ -2628,10 +2705,12 @@ export class LumenPdfView extends FileView {
     if (!this.inspectorList) return;
     this.annotationCount.textContent = String(this.index.logicalSize);
     if (!this.inspector.classList.contains("is-open")) {
+      this.inspectorColorRevision = -1;
       this.inspectorList.empty();
-      this.inspector.querySelector(".lumen-inspector-detail")?.remove();
+      this.inspector.querySelector(".lumod-inspector-detail")?.remove();
       return;
     }
+    this.renderInspectorColorFilters();
     if (!skipLayoutRead) {
       const virtualHeight = this.inspectorVirtualHeight(this.inspectorItemCount());
       this.inspectorList.scrollTop = Math.min(this.inspectorList.scrollTop, Math.max(0, virtualHeight - this.inspectorList.clientHeight));
@@ -2652,7 +2731,7 @@ export class LumenPdfView extends FileView {
     const scrollTop = scrollTopOverride ?? this.inspectorList.scrollTop;
     this.inspectorList.empty();
     if (!itemCount) {
-      this.inspectorList.createDiv({ cls: "lumen-empty", text: "No matching annotations" });
+      this.inspectorList.createDiv({ cls: "lumod-empty", text: "No matching annotations" });
       return;
     }
     const viewport = (viewportOverride ?? this.inspectorList.clientHeight) || 500;
@@ -2670,9 +2749,9 @@ export class LumenPdfView extends FileView {
     const windowItems = directWindow
       ? this.index.logicalSlice(start, end, this.inspectorSort === "newest")
       : filteredItems?.slice(start, end) ?? [];
-    const spacer = this.inspectorList.createDiv({ cls: "lumen-virtual-spacer" });
+    const spacer = this.inspectorList.createDiv({ cls: "lumod-virtual-spacer" });
     spacer.style.height = `${virtualHeight}px`;
-    const window = spacer.createDiv({ cls: "lumen-virtual-window" });
+    const window = spacer.createDiv({ cls: "lumod-virtual-window" });
     const windowHeight = (end - start) * CARD_HEIGHT;
     const windowTop = logicalHeight <= virtualHeight
       ? start * CARD_HEIGHT
@@ -2680,7 +2759,7 @@ export class LumenPdfView extends FileView {
     window.style.transform = `translateY(${windowTop}px)`;
     for (let offset = 0; offset < windowItems.length; offset++) {
       const item = windowItems[offset];
-      const card = window.createDiv({ cls: "lumen-annotation-card" });
+      const card = window.createDiv({ cls: "lumod-annotation-card" });
       if (this.mobileRuntime) {
         card.tabIndex = 0;
         card.setAttribute("role", "button");
@@ -2688,17 +2767,18 @@ export class LumenPdfView extends FileView {
       }
       card.style.top = `${offset * CARD_HEIGHT + 4}px`;
       card.style.setProperty("--mark-color", item.color);
-      const meta = card.createDiv({ cls: "lumen-card-meta" });
+      const meta = card.createDiv({ cls: "lumod-card-meta" });
       meta.createEl("strong", { text: this.annotationPageLabel(item, "p.") });
       meta.createSpan({ text: item.kind === "page-note" ? "page note" : item.note ? "note" : markLabel(item.style) });
+      meta.createSpan({ cls: "lumod-card-color", text: colorName(item.color) });
       if (this.mobileRuntime) {
         const edit = iconButton("pencil", "Edit annotation", () => this.openInspectorDetail(item.id));
-        edit.addClass("lumen-card-edit");
+        edit.addClass("lumod-card-edit");
         edit.addEventListener("keydown", event => event.stopPropagation());
         meta.append(edit);
       }
-      card.createDiv({ cls: "lumen-card-note", text: item.note || item.quote });
-      if (item.note) card.createDiv({ cls: "lumen-card-quote", text: item.quote });
+      card.createDiv({ cls: "lumod-card-note", text: item.note || item.quote });
+      if (item.note) card.createDiv({ cls: "lumod-card-quote", text: item.quote });
       const activate = () => {
         this.goToPage(item.page, "smooth", this.mobileRuntime ? item.rects[0]?.y : undefined);
         this.flashAnnotation(item.id);
@@ -2718,9 +2798,9 @@ export class LumenPdfView extends FileView {
   private openInspectorDetail(id: string): void {
     const annotation = this.index.get(id) ?? this.index.inGroup(id)[0];
     if (!annotation) return;
-    this.inspector.querySelector(".lumen-inspector-detail")?.remove();
-    const detail = this.inspector.createDiv({ cls: "lumen-inspector-detail" });
-    const header = detail.createDiv({ cls: "lumen-panel-header" });
+    this.inspector.querySelector(".lumod-inspector-detail")?.remove();
+    const detail = this.inspector.createDiv({ cls: "lumod-inspector-detail" });
+    const header = detail.createDiv({ cls: "lumod-panel-header" });
     header.append(iconButton("arrow-left", "Back to annotations", () => {
       detail.remove();
       this.refreshInspector();
@@ -2754,7 +2834,7 @@ export class LumenPdfView extends FileView {
     this.searchResults.empty();
     this.clearSearchFlashes();
     if (query.length < 2 || !this.pdfDocument) return;
-    this.searchResults.createDiv({ cls: "lumen-search-status", text: "Searching…" });
+    this.searchResults.createDiv({ cls: "lumod-search-status", text: "Searching…" });
     const lower = query.toLocaleLowerCase();
     const hits: SearchHit[] = [];
     for (let pageNumber = 1; pageNumber <= this.pdfDocument.numPages; pageNumber++) {
@@ -2883,7 +2963,7 @@ export class LumenPdfView extends FileView {
     this.searchHitsByPage.clear();
     this.activeSearchHit = null;
     if (!hits.length) {
-      this.searchResults.createDiv({ cls: "lumen-empty", text: "No matches" });
+      this.searchResults.createDiv({ cls: "lumod-empty", text: "No matches" });
       return;
     }
     for (const hit of hits) {
@@ -2895,17 +2975,17 @@ export class LumenPdfView extends FileView {
     const cardLimit = this.mobileRuntime ? MOBILE_MAX_SEARCH_RESULT_CARDS : 160;
     const resultStatus = `${hits.length} match${hits.length === 1 ? "" : "es"}`
       + (this.mobileRuntime && hits.length > cardLimit ? ` · first ${cardLimit} shown` : "");
-    this.searchResults.createDiv({ cls: "lumen-search-status", text: resultStatus });
+    this.searchResults.createDiv({ cls: "lumod-search-status", text: resultStatus });
     const doc = this.mobileRuntime ? this.containerEl.ownerDocument : document;
     for (const hit of hits.slice(0, cardLimit)) {
-      const card = this.searchResults.createDiv({ cls: "lumen-search-card" });
+      const card = this.searchResults.createDiv({ cls: "lumod-search-card" });
       if (this.mobileRuntime) {
         card.tabIndex = 0;
         card.setAttribute("role", "button");
         card.setAttribute("aria-label", `Open search result on page ${hit.page}`);
       }
-      card.createDiv({ cls: "lumen-card-meta", text: `p.${hit.page}` });
-      const excerpt = card.createDiv({ cls: "lumen-search-excerpt" });
+      card.createDiv({ cls: "lumod-card-meta", text: `p.${hit.page}` });
+      const excerpt = card.createDiv({ cls: "lumod-search-excerpt" });
       excerpt.append(doc.createTextNode(hit.before));
       excerpt.createEl("mark", { text: hit.match });
       excerpt.append(doc.createTextNode(hit.after));
@@ -2945,7 +3025,7 @@ export class LumenPdfView extends FileView {
       const exactRects = state.textReady ? this.searchRectsForRenderedRange(state, hit.start, hit.end) : null;
       for (const rect of exactRects ?? hit.rects) {
         if (rendered >= rectLimit) return;
-        const mark = searchHost.createDiv({ cls: "lumen-search-match" });
+        const mark = searchHost.createDiv({ cls: "lumod-search-match" });
         mark.classList.toggle("is-current", hit === this.activeSearchHit);
         mark.style.left = `${rect.x * 100}%`;
         mark.style.top = `${rect.y * 100}%`;
@@ -3378,10 +3458,13 @@ export class LumenPdfView extends FileView {
     this.inspectorCache = [];
     this.inspectorCacheRevision = -1;
     this.inspectorCacheKey = "";
+    this.inspectorColorRevision = -1;
     this.closeSelectionPalette();
     this.finishExtension();
     this.closeEditor();
+    if (this.sidecarTimer) await this.syncSidecar();
     if (this.bundle) {
+      this.bundle.repository.onChange = null;
       try {
         // Journal writes are incremental and bounded. A full snapshot can be
         // hundreds of megabytes for extreme annotation sets, so closing or
@@ -3399,6 +3482,7 @@ export class LumenPdfView extends FileView {
     this.pdfWorker = null;
     this.workerPort = null;
     this.bundle = null;
+    this.bundleFile = null;
     this.index = new AnnotationIndex();
     this.contentEl.empty();
   }

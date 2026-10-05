@@ -1,4 +1,13 @@
-# Lumen PDF Annotator
+# Lumen PDF Annotator Mod
+
+> **This is a fork of [Lumen PDF Annotator](https://github.com/BenGutteridge1/lumen-pdf-annotator) by Ben Gutteridge.** It is a separate plugin with its own plugin ID (`lumen-pdf-annotator-mod`), settings, storage folder (`.lumen-pdf-mod/`), view type, and link scheme (`obsidian://lumen-pdf-mod`), so it does not share or modify the original plugin's data. Disable the original before enabling this one, since only one plugin can be the default PDF viewer.
+>
+> The first time this fork opens a PDF, it copies that PDF's annotations from the original plugin's `.lumen-pdf-mod/` storage if any exist. It reads that folder but never writes to it.
+>
+> **Added in this fork:**
+>
+> - **View annotations by colour.** The inspector's colour row shows a chip for each highlight colour with a count. Click a chip to show only that colour, and click it again to show all colours. The sort menu also has a **Colour** option that groups cards by colour (palette order, then page). Each card shows its colour name.
+> - **Sidecar Markdown export.** Choose the file-download icon in the inspector header, or run **Export annotations to sidecar Markdown note**, to write `<PDF name>.md` next to the PDF. For example, `Papers/Smith 2024.pdf` → `Papers/Smith 2024.md`. In settings, choose whether the sidecar is grouped **by page** or **by highlight colour**, and optionally keep it updated automatically after each change. The plugin overwrites a note only if it created that note: it checks for `lumen-sidecar: true` in the frontmatter. Text you write below the sidecar's `%% lumen-sidecar-end … %%` line is kept when the sidecar is re-exported.
 
 Read, search, highlight, and annotate PDFs inside Obsidian with a calm interface designed to stay out of the document's way.
 
@@ -54,7 +63,7 @@ The production bundle was also exercised inside Obsidian 1.13.7 with a synthetic
 The source PDF is never edited. Lumen hashes its bytes with SHA-256 and stores a recoverable bundle in your vault:
 
 ```text
-.lumen-pdf/
+.lumen-pdf-mod/
   bundles/
     sha256/
       <document-hash>/
@@ -84,9 +93,9 @@ Once Lumen is accepted into the community directory:
 ### Manual installation
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
-2. Create `<your-vault>/.obsidian/plugins/lumen-pdf-annotator/`.
+2. Create `<your-vault>/.obsidian/plugins/lumen-pdf-annotator-mod/`.
 3. Place all three files in that folder.
-4. Reload Obsidian, then enable **Lumen PDF Annotator** under Community plugins.
+4. Reload Obsidian, then enable **Lumen PDF Annotator Mod** under Community plugins.
 
 Lumen supports Obsidian 1.13.7 or newer on desktop, iOS, and Android.
 
@@ -114,10 +123,10 @@ Previous page, next page, page-note placement, annotation checkpoint, export, le
 
 ### Backup, export, and migration commands
 
-- **Export annotations for this PDF** writes a readable Markdown file under `.lumen-pdf/exports/`. In **Settings → Lumen PDF Annotator → Export annotations**, choose individual annotated PDFs or select all filtered matches and export them together. Each PDF gets a separate, uniquely named Markdown note with the source PDF path, page headings, quoted highlight text, attached notes, tags, and links back to the exact annotation. Multi-page highlights stay grouped with their one associated note. Exports do not include raw recovery JSON and do not change the source PDFs.
+- **Export annotations for this PDF** writes a readable Markdown file under `.lumen-pdf-mod/exports/`. In **Settings → Lumen PDF Annotator → Export annotations**, choose individual annotated PDFs or select all filtered matches and export them together. Each PDF gets a separate, uniquely named Markdown note with the source PDF path, page headings, quoted highlight text, attached notes, tags, and links back to the exact annotation. Multi-page highlights stay grouped with their one associated note. Exports do not include raw recovery JSON and do not change the source PDFs.
 - **Save an annotation checkpoint** immediately compacts the journal into a snapshot.
 - **Verify all PDF backup checksums** checks every local backup against its SHA-256 identity.
-- **Restore a backed-up PDF** verifies the checksum before creating a non-destructive copy under `.lumen-pdf/recovered/`.
+- **Restore a backed-up PDF** verifies the checksum before creating a non-destructive copy under `.lumen-pdf-mod/recovered/`.
 - **Import legacy annotations for this PDF** explicitly imports compatible user-owned annotation data when present and uses stable IDs to prevent duplicates. Lumen does not scan every Markdown note when a PDF opens.
 
 ## Settings
@@ -134,7 +143,7 @@ npm run typecheck
 npm run build
 ```
 
-The production build is written to `dist/`. For a live development build, set `LUMEN_PDF_ANNOTATOR_PLUGIN_DIR` to a dedicated test-vault plugin directory and run `npm run dev`.
+The production build is written to `dist/`. For a live development build, set `LUMEN_PDF_ANNOTATOR_MOD_PLUGIN_DIR` to a dedicated test-vault plugin directory and run `npm run dev`.
 
 ## Scope and roadmap
 
