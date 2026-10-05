@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.7 — 2026-10-05
+
+- Made colour naming easier to find: a labelled **Colour names** button now sits in the All / Highlights / Notes row. Right-clicking (or long-pressing) a colour chip opens the same window, and so does the **Name highlight colours for this PDF** command.
+
 ## Mod 1.0.6 — 2026-10-05
 
 - Per-PDF colour names: use the tag button next to the colour chips to name each highlight colour (e.g. yellow → "friends") for the open PDF only. Names are stored with that PDF's annotations, appear on colour chips and cards, sort first under **Colour** sort, and are used in sidecar headings with a colour key. Other PDFs keep their own names, or the defaults.

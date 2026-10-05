@@ -1101,20 +1101,26 @@ export class LumenPdfView extends FileView {
       queryTimer = window.setTimeout(() => this.refreshInspector(), 120);
     });
     const filters = this.inspector.createDiv({ cls: "lumod-filter-row" });
+    const filterButtons: HTMLButtonElement[] = [];
     for (const [value, label] of [["all", "All"], ["highlights", "Highlights"], ["notes", "Notes"]] as const) {
       const button = filters.createEl("button", { text: label });
       button.classList.toggle("is-active", value === "all");
       button.addEventListener("click", () => {
         this.activeFilter = value;
-        filters.querySelectorAll("button").forEach(item => item.classList.toggle("is-active", item === button));
+        filterButtons.forEach(item => item.classList.toggle("is-active", item === button));
         this.refreshInspector();
       });
+      filterButtons.push(button);
     }
+    const nameColors = filters.createEl("button", {
+      cls: "lumod-color-names-button",
+      attr: { "aria-label": "Name highlight colours for this PDF" },
+    });
+    setIcon(nameColors.createSpan({ cls: "lumod-color-names-icon" }), "tag");
+    nameColors.createSpan({ text: "Colour names" });
+    nameColors.addEventListener("click", () => this.openColorNamesModal());
     const options = this.inspector.createDiv({ cls: "lumod-inspector-options" });
     this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by colour" } });
-    const nameColors = iconButton("tag", "Name highlight colours for this PDF", () => this.openColorNamesModal());
-    nameColors.addClass("lumod-color-names-button");
-    options.append(nameColors);
     const sort = options.createEl("select", { cls: "lumod-inspector-sort", attr: { "aria-label": "Sort annotations" } });
     sort.createEl("option", { value: "newest", text: "Newest" });
     sort.createEl("option", { value: "oldest", text: "Oldest" });
@@ -1158,6 +1164,11 @@ export class LumenPdfView extends FileView {
       if (hasCustomColorName(color, this.colorNames)) button.createSpan({ cls: "lumod-color-filter-name", text: name });
       button.createSpan({ cls: "lumod-color-filter-count", text: String(count) });
       button.addEventListener("click", () => this.setInspectorColor(this.activeColor === color ? "all" : color));
+      // Right-click (or long-press on touch devices) a chip to name the colours.
+      button.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        this.openColorNamesModal();
+      });
     }
   }
 
@@ -1167,7 +1178,7 @@ export class LumenPdfView extends FileView {
     return Array.from(new Set<string>([...MARK_COLORS, ...used])).sort((a, b) => compareColors(a, b, this.colorNames));
   }
 
-  private openColorNamesModal(): void {
+  openColorNamesModal(): void {
     if (!this.bundle || !this.bundleFile) return;
     new ColorNamesModal(this, this.bundleFile.name, this.knownColors(), this.colorNames, names => this.setColorNames(names)).open();
   }

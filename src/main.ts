@@ -89,6 +89,7 @@ export default class LumenPdfPlugin extends Plugin {
     });
     this.addReaderCommand("toggle-pdf-search", "Toggle PDF search", view => view.toggleSearch());
     this.addReaderCommand("toggle-annotation-inspector", "Toggle annotation inspector", view => view.toggleInspector());
+    this.addReaderCommand("name-highlight-colours", "Name highlight colours for this PDF", view => view.openColorNamesModal());
     this.addReaderCommand("previous-pdf-page", "Previous PDF page", view => view.previousPage());
     this.addReaderCommand("next-pdf-page", "Next PDF page", view => view.nextPage());
     this.addReaderCommand("zoom-pdf-in", "Zoom PDF in", view => view.zoomIn());

@@ -1104,10 +1104,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lumod-inspector-options > .lumod-color-names-button {
-  flex: none;
-  width: 26px;
-  height: 26px;
+.lumod-filter-row > .lumod-color-names-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.lumod-color-names-icon {
+  display: inline-flex;
+}
+.lumod-color-names-icon svg {
+  width: 13px;
+  height: 13px;
 }
 .lumod-color-names-swatch {
   display: inline-block;
@@ -1630,6 +1638,7 @@
   font-size: 16px;
 }
 .lumod-reader.is-mobile .lumod-filter-row {
+  flex-wrap: wrap;
   gap: 4px;
   padding: 3px 10px 7px;
 }
