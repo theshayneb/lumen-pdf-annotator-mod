@@ -36,18 +36,49 @@ const MARK_COLOR_NAMES: Record<string, string> = {
   "#e463a1": "Pink",
 };
 
-/** A readable name for a mark colour; imported colours fall back to their CSS value. */
-export function colorName(color: string): string {
-  return MARK_COLOR_NAMES[color.toLowerCase()] ?? color;
+/** Per-PDF names for highlight colours, keyed by lower-case colour value. */
+export type ColorNames = Record<string, string>;
+
+function customColorName(color: string, names?: ColorNames): string {
+  return names?.[color.toLowerCase()]?.trim() ?? "";
 }
 
-/** Palette order first, then any other colours alphabetically. */
-export function compareColors(a: string, b: string): number {
+/**
+ * A readable name for a mark colour: this PDF's custom name if it has one,
+ * otherwise the palette name, otherwise the colour's CSS value.
+ */
+export function colorName(color: string, names?: ColorNames): string {
+  return customColorName(color, names) || (MARK_COLOR_NAMES[color.toLowerCase()] ?? color);
+}
+
+export function hasCustomColorName(color: string, names?: ColorNames): boolean {
+  return !!customColorName(color, names);
+}
+
+/** Custom-named colours first (alphabetically), then palette order, then any other colours. */
+export function compareColors(a: string, b: string, names?: ColorNames): number {
+  const customA = customColorName(a, names);
+  const customB = customColorName(b, names);
+  if (customA || customB) {
+    if (!customA) return 1;
+    if (!customB) return -1;
+    const byName = customA.localeCompare(customB, undefined, { sensitivity: "base" });
+    if (byName) return byName;
+  }
   const rank = (color: string) => {
     const index = (MARK_COLORS as readonly string[]).indexOf(color.toLowerCase());
     return index === -1 ? MARK_COLORS.length : index;
   };
   return rank(a) - rank(b) || a.toLowerCase().localeCompare(b.toLowerCase());
+}
+
+export function normalizeColorNames(value: unknown): ColorNames {
+  const names: ColorNames = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return names;
+  for (const [color, name] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof name === "string" && name.trim()) names[color.toLowerCase()] = name.trim().slice(0, 80);
+  }
+  return names;
 }
 
 export class AnnotationIndex {

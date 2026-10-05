@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.6 — 2026-10-05
+
+- Per-PDF colour names: use the tag button next to the colour chips to name each highlight colour (e.g. yellow → "friends") for the open PDF only. Names are stored with that PDF's annotations, appear on colour chips and cards, sort first under **Colour** sort, and are used in sidecar headings with a colour key. Other PDFs keep their own names, or the defaults.
+
 ## Mod 1.0.5 — 2026-10-05
 
 - Plugin storage moved from `.lumen-pdf-mod/` to `Dashboard/` (annotation bundles, file index, exports, and recovered PDFs). Each PDF's annotations are copied from `.lumen-pdf-mod/` (or the original plugin's `.lumen-pdf/`) the first time it is opened. The old folder is never modified, so it can be deleted once every annotated PDF has been opened. PDFs not yet reopened can still be exported, and their recovery copies can still be restored, from the old folder.

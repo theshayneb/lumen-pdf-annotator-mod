@@ -1,5 +1,5 @@
 import { normalizePath, TFile, Vault } from "obsidian";
-import { AnnotationIndex, AnnotationMutation, MARK_COLORS, MarkStyle, PdfAnnotation } from "./model";
+import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MarkStyle, normalizeColorNames, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
 export const STORAGE_FOLDER = "Dashboard";
@@ -10,6 +10,9 @@ const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
 // annotations are copied across the first time it is opened here.
 const PREVIOUS_ROOTS = [".lumen-pdf-mod/bundles/sha256", ".lumen-pdf/bundles/sha256"];
 const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
+// Per-PDF colour names. They live in the PDF's bundle, so they follow the PDF
+// (by content) and never apply to other PDFs.
+const COLOR_NAMES_FILE = "color-names.json";
 const ANNOTATION_FILES = [
   "annotations.snapshot.json",
   "annotations.snapshot.previous.json",
@@ -258,6 +261,7 @@ export class AnnotationRepository {
   private readonly compactSnapshotPath: string;
   private readonly compactPreviousPath: string;
   private readonly journalPath: string;
+  private readonly colorNamesPath: string;
   private readonly queued = new Map<string, AnnotationMutation>();
   private flushTimer: number | null = null;
   private flushing: Promise<void> | null = null;
@@ -276,6 +280,7 @@ export class AnnotationRepository {
     this.compactSnapshotPath = `${folder}/annotations.snapshot.json`;
     this.compactPreviousPath = `${folder}/annotations.snapshot.previous.json`;
     this.journalPath = `${folder}/annotations.journal.jsonl`;
+    this.colorNamesPath = `${folder}/${COLOR_NAMES_FILE}`;
   }
 
   async load(): Promise<AnnotationIndex> {
@@ -401,6 +406,19 @@ export class AnnotationRepository {
     }
   }
 
+  async loadColorNames(): Promise<ColorNames> {
+    if (!(await this.vault.adapter.exists(this.colorNamesPath))) return {};
+    try {
+      return normalizeColorNames(JSON.parse(await this.vault.adapter.read(this.colorNamesPath)));
+    } catch {
+      return {};
+    }
+  }
+
+  async saveColorNames(names: ColorNames): Promise<void> {
+    await this.vault.adapter.write(this.colorNamesPath, JSON.stringify(normalizeColorNames(names), null, 2));
+  }
+
   async exportReadable(index: AnnotationIndex, originalName: string): Promise<string> {
     await this.flushJournal();
     const folder = `${STORAGE_FOLDER}/exports`;
@@ -463,7 +481,7 @@ async function importPreviousAnnotations(vault: Vault, hash: string, folder: str
     const source = `${root}/${hash}`;
     if (!(await hasAnnotationFiles(vault, source))) continue;
     try {
-      for (const name of ANNOTATION_FILES) {
+      for (const name of [...ANNOTATION_FILES, COLOR_NAMES_FILE]) {
         if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
       }
     } catch (error) {

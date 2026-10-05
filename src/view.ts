@@ -1,8 +1,8 @@
-import { FileView, Menu, Notice, Platform, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, Menu, Modal, Notice, Platform, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import type { PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { TextLayer } from "pdfjs-dist/types/src/display/text_layer";
 import { annotationMarkdownLink } from "./links";
-import { AnnotationIndex, colorName, compareColors, MARK_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
+import { AnnotationIndex, colorName, ColorNames, compareColors, hasCustomColorName, MARK_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
 import { annotationTarget, comparableFileName, QuoteAnnotationRecord, quoteAnnotations } from "./legacy";
 import { loadPdf } from "./pdf-runtime";
 import {
@@ -287,6 +287,9 @@ export class LumenPdfView extends FileView {
   private inspectorColorFilters!: HTMLElement;
   private inspectorColorRevision = -1;
   private sidecarTimer = 0;
+  // Names for highlight colours in this PDF only, stored in its bundle.
+  private colorNames: ColorNames = {};
+  private colorNamesVersion = 0;
   // The PDF that `bundle` and `index` belong to. `this.file` already points at
   // the next PDF while the previous one is being torn down.
   private bundleFile: TFile | null = null;
@@ -454,9 +457,15 @@ export class LumenPdfView extends FileView {
     catch (error) { console.warn("Lumen could not initialize PDF view state", error); }
     const index = await indexPromise;
     if (generation !== this.documentGeneration) return;
+    let colorNames: ColorNames = {};
+    try { colorNames = await bundle.repository.loadColorNames(); }
+    catch (error) { console.error("Lumen could not load colour names", error); }
+    if (generation !== this.documentGeneration) return;
     this.bundle = bundle;
     this.bundleFile = file;
     this.index = index;
+    this.colorNames = colorNames;
+    this.colorNamesVersion++;
     this.sidecarConflictReported = false;
     bundle.repository.onChange = () => this.scheduleSidecarSync();
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
@@ -602,7 +611,7 @@ export class LumenPdfView extends FileView {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;
     if (!this.bundle || !this.bundleFile) return null;
-    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping);
+    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames);
   }
 
   private scheduleSidecarSync(): void {
@@ -1103,6 +1112,9 @@ export class LumenPdfView extends FileView {
     }
     const options = this.inspector.createDiv({ cls: "lumod-inspector-options" });
     this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by colour" } });
+    const nameColors = iconButton("tag", "Name highlight colours for this PDF", () => this.openColorNamesModal());
+    nameColors.addClass("lumod-color-names-button");
+    options.append(nameColors);
     const sort = options.createEl("select", { cls: "lumod-inspector-sort", attr: { "aria-label": "Sort annotations" } });
     sort.createEl("option", { value: "newest", text: "Newest" });
     sort.createEl("option", { value: "oldest", text: "Oldest" });
@@ -1126,7 +1138,7 @@ export class LumenPdfView extends FileView {
     this.inspectorColorRevision = this.index.version;
     const counts = new Map<string, number>();
     for (const item of this.index.logicalAll()) counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
-    const colors = Array.from(new Set<string>([...MARK_COLORS, ...counts.keys()])).sort(compareColors);
+    const colors = this.knownColors(counts);
     if (this.activeColor !== "all" && !colors.includes(this.activeColor)) this.activeColor = "all";
     this.inspectorColorFilters.empty();
     const allColors = this.inspectorColorFilters.createEl("button", { cls: "lumod-all-colors", text: "All", attr: { "aria-label": "Show all colours" } });
@@ -1134,7 +1146,7 @@ export class LumenPdfView extends FileView {
     allColors.addEventListener("click", () => this.setInspectorColor("all"));
     for (const color of colors) {
       const count = counts.get(color) ?? 0;
-      const name = colorName(color);
+      const name = colorName(color, this.colorNames);
       const button = this.inspectorColorFilters.createEl("button", {
         cls: "lumod-color-filter",
         attr: { "aria-label": `Show ${name} annotations (${count})`, title: `${name} · ${count}` },
@@ -1143,9 +1155,31 @@ export class LumenPdfView extends FileView {
       button.classList.toggle("is-active", this.activeColor === color);
       button.classList.toggle("is-empty", count === 0);
       button.createSpan({ cls: "lumod-color-filter-swatch" });
+      if (hasCustomColorName(color, this.colorNames)) button.createSpan({ cls: "lumod-color-filter-name", text: name });
       button.createSpan({ cls: "lumod-color-filter-count", text: String(count) });
       button.addEventListener("click", () => this.setInspectorColor(this.activeColor === color ? "all" : color));
     }
+  }
+
+  /** The palette plus any other colours used in this PDF, in display order. */
+  private knownColors(counts?: Map<string, number>): string[] {
+    const used = counts ? Array.from(counts.keys()) : this.index.logicalAll().map(item => item.color);
+    return Array.from(new Set<string>([...MARK_COLORS, ...used])).sort((a, b) => compareColors(a, b, this.colorNames));
+  }
+
+  private openColorNamesModal(): void {
+    if (!this.bundle || !this.bundleFile) return;
+    new ColorNamesModal(this, this.bundleFile.name, this.knownColors(), this.colorNames, names => this.setColorNames(names)).open();
+  }
+
+  private async setColorNames(names: ColorNames): Promise<void> {
+    if (!this.bundle) return;
+    await this.bundle.repository.saveColorNames(names);
+    this.colorNames = names;
+    this.colorNamesVersion++;
+    this.inspectorColorRevision = -1;
+    this.refreshInspector();
+    this.scheduleSidecarSync();
   }
 
   private setInspectorColor(color: string): void {
@@ -2668,7 +2702,7 @@ export class LumenPdfView extends FileView {
 
   private filteredAnnotations(): PdfAnnotation[] {
     const query = this.inspectorQuery?.value.trim().toLowerCase() ?? "";
-    const key = `${this.activeFilter}\u0000${this.activeColor}\u0000${this.inspectorSort}\u0000${query}`;
+    const key = `${this.activeFilter}\u0000${this.activeColor}\u0000${this.inspectorSort}\u0000${this.colorNamesVersion}\u0000${query}`;
     if (this.inspectorCacheRevision === this.index.version && this.inspectorCacheKey === key) return this.inspectorCache;
     const all = this.index.logicalAll();
     this.inspectorCache = this.activeFilter === "all" && this.activeColor === "all" && !query
@@ -2682,7 +2716,7 @@ export class LumenPdfView extends FileView {
       });
     if (this.inspectorSort === "newest") this.inspectorCache.reverse();
     else if (this.inspectorSort === "page") this.inspectorCache.sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
-    else if (this.inspectorSort === "color") this.inspectorCache.sort((a, b) => compareColors(a.color, b.color) || a.page - b.page || a.createdAt - b.createdAt);
+    else if (this.inspectorSort === "color") this.inspectorCache.sort((a, b) => compareColors(a.color, b.color, this.colorNames) || a.page - b.page || a.createdAt - b.createdAt);
     this.inspectorCacheRevision = this.index.version;
     this.inspectorCacheKey = key;
     return this.inspectorCache;
@@ -2772,7 +2806,7 @@ export class LumenPdfView extends FileView {
       const meta = card.createDiv({ cls: "lumod-card-meta" });
       meta.createEl("strong", { text: this.annotationPageLabel(item, "p.") });
       meta.createSpan({ text: item.kind === "page-note" ? "page note" : item.note ? "note" : markLabel(item.style) });
-      meta.createSpan({ cls: "lumod-card-color", text: colorName(item.color) });
+      meta.createSpan({ cls: "lumod-card-color", text: colorName(item.color, this.colorNames) });
       if (this.mobileRuntime) {
         const edit = iconButton("pencil", "Edit annotation", () => this.openInspectorDetail(item.id));
         edit.addClass("lumod-card-edit");
@@ -3485,7 +3519,60 @@ export class LumenPdfView extends FileView {
     this.workerPort = null;
     this.bundle = null;
     this.bundleFile = null;
+    this.colorNames = {};
+    this.colorNamesVersion++;
     this.index = new AnnotationIndex();
+    this.contentEl.empty();
+  }
+}
+
+/** Edit the names of highlight colours for one PDF. */
+class ColorNamesModal extends Modal {
+  private readonly draft: ColorNames;
+
+  constructor(
+    view: LumenPdfView,
+    private readonly pdfName: string,
+    private readonly colors: string[],
+    current: ColorNames,
+    private readonly onSave: (names: ColorNames) => Promise<void>,
+  ) {
+    super(view.app);
+    this.draft = { ...current };
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("lumod-color-names-modal");
+    this.titleEl.setText("Name highlight colours");
+    this.contentEl.createEl("p", {
+      cls: "lumod-color-names-help",
+      text: `These names apply only to ${this.pdfName} and its sidecar note. Leave a name empty to use the default.`,
+    });
+    for (const color of this.colors) {
+      const key = color.toLowerCase();
+      const setting = new Setting(this.contentEl).setName(colorName(color));
+      const swatch = createSpan({ cls: "lumod-color-names-swatch" });
+      swatch.style.setProperty("--mark-color", color);
+      setting.nameEl.prepend(swatch);
+      setting.addText(text => text
+        .setPlaceholder(colorName(color))
+        .setValue(this.draft[key] ?? "")
+        .onChange(value => {
+          if (value.trim()) this.draft[key] = value.trim();
+          else delete this.draft[key];
+        }));
+    }
+    new Setting(this.contentEl)
+      .addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton(button => button.setButtonText("Save").setCta().onClick(() => {
+        void this.onSave(this.draft).then(() => this.close()).catch(error => {
+          console.error("Lumen could not save colour names", error);
+          new Notice("Could not save the colour names.");
+        });
+      }));
+  }
+
+  onClose(): void {
     this.contentEl.empty();
   }
 }

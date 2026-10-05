@@ -1,7 +1,8 @@
 import { normalizePath, TFile } from "obsidian";
 import type { Vault } from "obsidian";
 import { annotationUri } from "./links";
-import { colorName, compareColors } from "./model";
+import { colorName, compareColors, hasCustomColorName } from "./model";
+import type { ColorNames } from "./model";
 import type { AnnotationIndex, PdfAnnotation } from "./model";
 
 export type SidecarGrouping = "page" | "color";
@@ -113,15 +114,16 @@ function tagLabel(tag: string): string {
 }
 
 /** A colour label that Obsidian will not mistake for a tag. */
-function markdownColorName(color: string): string {
+function markdownColorName(color: string, names: ColorNames): string {
+  if (hasCustomColorName(color, names)) return escapeInline(colorName(color, names)).replace(/(^|\s)#/g, "$1\\#");
   const name = colorName(color);
   return name === color ? `Custom colour \`${color.replace(/`/g, "")}\`` : name;
 }
 
-function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string, heading: string): void {
+function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string, heading: string, names: ColorNames): void {
   const { anchor, members, pages } = entry;
   const kind = anchor.kind === "page-note" ? "Page note" : styleLabel(anchor);
-  const label = anchor.kind === "page-note" ? kind : `${markdownColorName(anchor.color)} ${kind.toLowerCase()}`;
+  const label = anchor.kind === "page-note" ? kind : `${markdownColorName(anchor.color, names)} ${kind.toLowerCase()}`;
   lines.push(`${heading} ${label} · ${pageLabel(pages)}`, "");
   const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
   for (const member of quoted) {
@@ -137,7 +139,7 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
 }
 
 /** Markdown for a sidecar note, grouped by page or by highlight colour. */
-export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping): Promise<string> {
+export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping, names: ColorNames = {}): Promise<string> {
   const entries = await exportEntries(index);
   const lines = [
     "---",
@@ -153,6 +155,10 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
     `Annotations from [[${pdf.path}|${escapeInline(pdf.name)}]].`,
     "",
   ];
+  const named = Object.keys(names).filter(color => hasCustomColorName(color, names)).sort((a, b) => compareColors(a, b, names));
+  if (named.length) {
+    lines.push(`Colour key: ${named.map(color => `${markdownColorName(color, names)} (${markdownColorName(color, {}).toLowerCase()})`).join(", ")}`, "");
+  }
   if (!entries.length) lines.push("*No annotations yet.*", "");
   if (grouping === "color") {
     const groups = new Map<string, ExportEntry[]>();
@@ -166,14 +172,14 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
       group.push(entry);
       groups.set(entry.anchor.color, group);
     }
-    for (const color of Array.from(groups.keys()).sort(compareColors)) {
+    for (const color of Array.from(groups.keys()).sort((a, b) => compareColors(a, b, names))) {
       const group = groups.get(color) ?? [];
-      lines.push(`## ${markdownColorName(color)} (${group.length})`, "");
-      for (const entry of group) renderEntry(lines, entry, vaultName, pdf.path, "###");
+      lines.push(`## ${markdownColorName(color, names)} (${group.length})`, "");
+      for (const entry of group) renderEntry(lines, entry, vaultName, pdf.path, "###", names);
     }
     if (notes.length) {
       lines.push(`## Page notes (${notes.length})`, "");
-      for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path, "###");
+      for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path, "###", names);
     }
   } else {
     let currentPage = -1;
@@ -182,7 +188,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
         currentPage = entry.pages[0];
         lines.push(`## Page ${currentPage}`, "");
       }
-      renderEntry(lines, entry, vaultName, pdf.path, "###");
+      renderEntry(lines, entry, vaultName, pdf.path, "###", names);
     }
   }
   lines.push(SIDECAR_END, "");
@@ -234,9 +240,9 @@ export async function sidecarPath(vault: Vault, pdf: TFile): Promise<string> {
  * when they are this PDF's sidecar, and text the user added below the end
  * marker is carried over.
  */
-export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping): Promise<string> {
+export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}): Promise<string> {
   const path = await sidecarPath(vault, pdf);
-  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping);
+  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping, names);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
     await vault.process(existing, content => {

@@ -1097,6 +1097,31 @@
   background: var(--mark-color);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
 }
+.lumod-color-filter-name {
+  max-width: 90px;
+  overflow: hidden;
+  color: var(--lumod-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lumod-inspector-options > .lumod-color-names-button {
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+.lumod-color-names-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  border-radius: 4px;
+  vertical-align: -2px;
+  background: var(--mark-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
+}
+.lumod-color-names-help {
+  color: var(--text-muted);
+}
 .lumod-color-filter-count {
   color: var(--lumod-muted);
 }
