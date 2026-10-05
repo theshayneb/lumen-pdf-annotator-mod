@@ -283,7 +283,7 @@ export class LumenPdfView extends FileView {
   private theme: PdfTheme;
   private activeFilter: "all" | "highlights" | "notes" = "all";
   private activeColor = "all";
-  private inspectorSort: "newest" | "oldest" | "page" | "color" = "newest";
+  private inspectorSort: "newest" | "oldest" | "page" | "color" = "page";
   private inspectorColorFilters!: HTMLElement;
   private inspectorColorRevision = -1;
   private sidecarTimer = 0;

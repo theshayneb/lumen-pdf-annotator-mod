@@ -2,6 +2,11 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.2 — 2026-10-05
+
+- The annotation inspector now sorts by page by default.
+- Fixed unreadable annotation and search cards on hover with themes whose hover colour is near-white; cards now tint their own background instead.
+
 ## Mod 1.0.1 — 2026-10-05
 
 - Releases are now published automatically: every push to `main` builds the plugin and creates (or updates) the GitHub release and tag for the version in `manifest.json`, so BRAT can install and update it.

@@ -506,9 +506,13 @@
   margin: 0 0 6px;
   padding: 9px 10px;
 }
-.lumod-search-card:hover,
-.lumod-annotation-card:hover {
-  background: var(--background-modifier-hover);
+/* Tint the card's own surface rather than using the theme's hover colour:
+   some themes make --background-modifier-hover near-white, which left light
+   card text unreadable. */
+.lumod-reader:not(#lumod-specificity) .lumod-search-card:hover,
+.lumod-reader:not(#lumod-specificity) .lumod-annotation-card:hover {
+  background: color-mix(in srgb, var(--mark-color, var(--lumod-text)) 12%, var(--lumod-surface));
+  color: var(--lumod-text);
 }
 .lumod-card-meta {
   display: flex;
@@ -1896,8 +1900,8 @@
   .lumod-reader.is-mobile .lumod-mark:hover {
     filter: none;
   }
-  .lumod-reader.is-mobile .lumod-search-card:hover,
-  .lumod-reader.is-mobile .lumod-annotation-card:hover {
+  .lumod-reader.is-mobile:not(#lumod-specificity) .lumod-search-card:hover,
+  .lumod-reader.is-mobile:not(#lumod-specificity) .lumod-annotation-card:hover {
     background: var(--lumod-surface);
   }
 }
