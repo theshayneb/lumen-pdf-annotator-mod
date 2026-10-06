@@ -1,6 +1,6 @@
 {
   "name": "lumen-pdf-annotator-mod",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "Fork of Lumen PDF Annotator with colour views and sidecar Markdown export.",
   "repository": {

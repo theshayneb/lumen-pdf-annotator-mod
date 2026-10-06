@@ -4,12 +4,13 @@ import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
 import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, restoreBundle, verifyBundle } from "./storage";
 import type { SidecarGrouping } from "./annotation-export";
-import { LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
+import { InterfaceTheme, LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
 
 interface LumenSettings {
   defaultViewer: boolean;
   pdfTheme: PdfTheme;
+  interfaceTheme: InterfaceTheme;
   legacyAnnotationFolder: string;
   automaticPdfBackups: boolean;
   sidecarGrouping: SidecarGrouping;
@@ -19,14 +20,19 @@ interface LumenSettings {
 const DEFAULT_SETTINGS: LumenSettings = {
   defaultViewer: true,
   pdfTheme: "light",
+  interfaceTheme: "dark",
   legacyAnnotationFolder: "PDF annotations",
   automaticPdfBackups: false,
-  sidecarGrouping: "page",
+  sidecarGrouping: "color",
   sidecarAutoSync: false,
 };
 
 function isPdfTheme(value: unknown): value is PdfTheme {
   return value === "light" || value === "sepia" || value === "dark";
+}
+
+function isInterfaceTheme(value: unknown): value is InterfaceTheme {
+  return value === "dark" || value === "light" || value === "pdf";
 }
 
 function isSidecarGrouping(value: unknown): value is SidecarGrouping {
@@ -39,6 +45,7 @@ function readSettings(value: unknown): LumenSettings {
   return {
     defaultViewer: typeof stored.defaultViewer === "boolean" ? stored.defaultViewer : DEFAULT_SETTINGS.defaultViewer,
     pdfTheme: isPdfTheme(stored.pdfTheme) ? stored.pdfTheme : DEFAULT_SETTINGS.pdfTheme,
+    interfaceTheme: isInterfaceTheme(stored.interfaceTheme) ? stored.interfaceTheme : DEFAULT_SETTINGS.interfaceTheme,
     legacyAnnotationFolder: typeof stored.legacyAnnotationFolder === "string" ? stored.legacyAnnotationFolder : DEFAULT_SETTINGS.legacyAnnotationFolder,
     automaticPdfBackups: typeof stored.automaticPdfBackups === "boolean" ? stored.automaticPdfBackups : DEFAULT_SETTINGS.automaticPdfBackups,
     sidecarGrouping: isSidecarGrouping(stored.sidecarGrouping) ? stored.sidecarGrouping : DEFAULT_SETTINGS.sidecarGrouping,
@@ -70,6 +77,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.automaticPdfBackups,
       () => this.viewState.attach(leaf),
       () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoSync }),
+      () => this.settings.interfaceTheme,
     ));
     if (this.settings.defaultViewer) this.installAsDefaultPdfViewer();
     this.registerObsidianProtocolHandler(LUMEN_PROTOCOL_ACTION, params => void this.openAnnotationLink(params).catch(error => {
@@ -89,7 +97,7 @@ export default class LumenPdfPlugin extends Plugin {
     });
     this.addReaderCommand("toggle-pdf-search", "Toggle PDF search", view => view.toggleSearch());
     this.addReaderCommand("toggle-annotation-inspector", "Toggle annotation inspector", view => view.toggleInspector());
-    this.addReaderCommand("name-highlight-colours", "Name highlight colours for this PDF", view => view.openColorNamesModal());
+    this.addReaderCommand("name-highlight-colours", "Name highlight colors for this PDF", view => view.openColorNamesModal());
     this.addReaderCommand("previous-pdf-page", "Previous PDF page", view => view.previousPage());
     this.addReaderCommand("next-pdf-page", "Next PDF page", view => view.nextPage());
     this.addReaderCommand("zoom-pdf-in", "Zoom PDF in", view => view.zoomIn());
@@ -202,6 +210,14 @@ export default class LumenPdfPlugin extends Plugin {
     await this.saveSettings();
   }
 
+  async setInterfaceTheme(theme: InterfaceTheme): Promise<void> {
+    this.settings.interfaceTheme = theme;
+    for (const leaf of this.app.workspace.getLeavesOfType(LUMEN_VIEW_TYPE)) {
+      if (leaf.view instanceof LumenPdfView) leaf.view.refreshInterfaceTheme();
+    }
+    await this.saveSettings();
+  }
+
   saveSettings(): Promise<void> {
     return this.saveMergedData({ ...this.settings });
   }
@@ -290,6 +306,11 @@ class LumenSettingTab extends PluginSettingTab {
         control: { type: "dropdown", key: "pdfTheme", options: { light: "Light", sepia: "Sepia", dark: "Dark" }, defaultValue: DEFAULT_SETTINGS.pdfTheme },
       },
       {
+        name: "Interface theme",
+        desc: "Theme for Lumen's toolbar, panels, and editors. The PDF pages keep the PDF theme.",
+        control: { type: "dropdown", key: "interfaceTheme", options: { dark: "Dark", light: "Light", pdf: "Match PDF theme" }, defaultValue: DEFAULT_SETTINGS.interfaceTheme },
+      },
+      {
         name: "Legacy annotation folder",
         desc: "Look here for older Markdown annotation notes that target the open PDF.",
         control: { type: "text", key: "legacyAnnotationFolder", placeholder: "PDF annotations", defaultValue: DEFAULT_SETTINGS.legacyAnnotationFolder },
@@ -301,8 +322,8 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Sidecar note grouping",
-        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, in the vault root) is organised.",
-        control: { type: "dropdown", key: "sidecarGrouping", options: { page: "By page", color: "By highlight colour" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
+        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, in the vault root) is organized: a heading per highlight color, or per page.",
+        control: { type: "dropdown", key: "sidecarGrouping", options: { color: "By highlight color", page: "By page" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
       },
       {
         name: "Keep sidecar notes up to date",
@@ -322,6 +343,7 @@ class LumenSettingTab extends PluginSettingTab {
   getControlValue(key: string): unknown {
     if (key === "defaultViewer") return this.plugin.settings.defaultViewer;
     if (key === "pdfTheme") return this.plugin.settings.pdfTheme;
+    if (key === "interfaceTheme") return this.plugin.settings.interfaceTheme;
     if (key === "legacyAnnotationFolder") return this.plugin.settings.legacyAnnotationFolder;
     if (key === "automaticPdfBackups") return this.plugin.settings.automaticPdfBackups;
     if (key === "sidecarGrouping") return this.plugin.settings.sidecarGrouping;
@@ -337,6 +359,7 @@ class LumenSettingTab extends PluginSettingTab {
       });
     }
     if (key === "pdfTheme" && isPdfTheme(value)) return this.plugin.setPdfTheme(value);
+    if (key === "interfaceTheme" && isInterfaceTheme(value)) return this.plugin.setInterfaceTheme(value);
     if (key === "legacyAnnotationFolder" && typeof value === "string") {
       this.plugin.settings.legacyAnnotationFolder = value.trim().replace(/^\/+|\/+$/g, "") || "PDF annotations";
       return this.plugin.saveSettings();

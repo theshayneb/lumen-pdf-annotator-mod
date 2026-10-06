@@ -93,11 +93,15 @@ export async function writeAnnotationExport(vault: Vault, path: string, index: A
   }
 }
 
-/** Frontmatter key that marks a note as a sidecar this plugin may overwrite. */
-const SIDECAR_MARKER = "lumen-sidecar";
+/**
+ * The sidecar's only frontmatter property: the PDF it belongs to. Its presence
+ * is also what allows the plugin to overwrite the note.
+ */
+const SIDECAR_PDF_KEY = "lumen-pdf";
 const SIDECAR_END = "%% lumen-sidecar-end: anything you write below this line is kept when the sidecar is re-exported %%";
-
-const SIDECAR_PDF_KEY = "lumen-pdf-path";
+// Frontmatter written by 1.0.0–1.0.7, still recognised so old sidecars are reused.
+const LEGACY_MARKER = "lumen-sidecar";
+const LEGACY_PDF_KEY = "lumen-pdf-path";
 
 /** Sidecars live in the vault root: `<pdf name>.md`, then `<pdf name> 2.md`, … on name clashes. */
 function sidecarCandidate(pdf: TFile, attempt: number): string {
@@ -108,57 +112,53 @@ function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function tagLabel(tag: string): string {
-  // Render as an Obsidian tag when it is a valid one, otherwise as plain text.
-  return /^[\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*$/u.test(tag) ? `#${tag}` : escapeInline(tag);
-}
-
-/** A colour label that Obsidian will not mistake for a tag. */
+/** A color label that Obsidian will not mistake for a tag. */
 function markdownColorName(color: string, names: ColorNames): string {
   if (hasCustomColorName(color, names)) return escapeInline(colorName(color, names)).replace(/(^|\s)#/g, "$1\\#");
   const name = colorName(color);
-  return name === color ? `Custom colour \`${color.replace(/`/g, "")}\`` : name;
+  return name === color ? `Custom color \`${color.replace(/`/g, "")}\`` : name;
 }
 
-function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string, heading: string, names: ColorNames): void {
-  const { anchor, members, pages } = entry;
-  const kind = anchor.kind === "page-note" ? "Page note" : styleLabel(anchor);
-  const label = anchor.kind === "page-note" ? kind : `${markdownColorName(anchor.color, names)} ${kind.toLowerCase()}`;
-  lines.push(`${heading} ${label} · ${pageLabel(pages)}`, "");
+/**
+ * One annotation:
+ *
+ *     > Page 3: highlighted text
+ *
+ *     * note (only when there is one)
+ *
+ *
+ *     [Open in PDF](obsidian://…)
+ */
+function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
+  const { anchor, members } = entry;
   const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
-  for (const member of quoted) {
-    if (pages.length > 1) lines.push(`*Page ${member.page}*`, "");
-    lines.push(...quoteLines(member.quote), "");
+  if (quoted.length) {
+    for (const member of quoted) lines.push(`> Page ${member.page}: ${member.quote.replace(/\s+/g, " ").trim()}`);
+  } else {
+    lines.push(`> Page ${anchor.page}`);
   }
+  lines.push("");
   const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
     ?? members.find(item => item.note.trim())?.note;
-  if (note) lines.push(note.trim(), "");
-  const tags = members.find(item => item.tags.length)?.tags ?? [];
-  if (tags.length) lines.push(`Tags: ${tags.map(tagLabel).join(", ")}`, "");
+  if (note) {
+    const [first, ...rest] = note.trim().split(/\r?\n/);
+    lines.push(`* ${first}`, ...rest.map(line => line.trim() ? `  ${line}` : ""), "", "");
+  }
   lines.push(`[Open in PDF](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)})`, "");
 }
 
-/** Markdown for a sidecar note, grouped by page or by highlight colour. */
+/** Markdown for a sidecar note, grouped by highlight color or by page. */
 export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping, names: ColorNames = {}): Promise<string> {
   const entries = await exportEntries(index);
   const lines = [
     "---",
-    `${SIDECAR_MARKER}: true`,
     `${SIDECAR_PDF_KEY}: ${yamlString(pdf.path)}`,
-    `pdf: ${yamlString(`[[${pdf.path}|${pdf.name}]]`)}`,
-    `exported: ${new Date().toISOString()}`,
-    `annotations: ${entries.length}`,
+    "---",
+    `[[${pdf.path}|${pdf.name}]]`,
+    "",
     "---",
     "",
-    `# ${escapeInline(pdf.basename)}`,
-    "",
-    `Annotations from [[${pdf.path}|${escapeInline(pdf.name)}]].`,
-    "",
   ];
-  const named = Object.keys(names).filter(color => hasCustomColorName(color, names)).sort((a, b) => compareColors(a, b, names));
-  if (named.length) {
-    lines.push(`Colour key: ${named.map(color => `${markdownColorName(color, names)} (${markdownColorName(color, {}).toLowerCase()})`).join(", ")}`, "");
-  }
   if (!entries.length) lines.push("*No annotations yet.*", "");
   if (grouping === "color") {
     const groups = new Map<string, ExportEntry[]>();
@@ -173,22 +173,21 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
       groups.set(entry.anchor.color, group);
     }
     for (const color of Array.from(groups.keys()).sort((a, b) => compareColors(a, b, names))) {
-      const group = groups.get(color) ?? [];
-      lines.push(`## ${markdownColorName(color, names)} (${group.length})`, "");
-      for (const entry of group) renderEntry(lines, entry, vaultName, pdf.path, "###", names);
+      lines.push(`# ${markdownColorName(color, names)}`, "");
+      for (const entry of groups.get(color) ?? []) renderEntry(lines, entry, vaultName, pdf.path);
     }
     if (notes.length) {
-      lines.push(`## Page notes (${notes.length})`, "");
-      for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path, "###", names);
+      lines.push("# Page notes", "");
+      for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path);
     }
   } else {
     let currentPage = -1;
     for (const entry of entries) {
       if (entry.pages[0] !== currentPage) {
         currentPage = entry.pages[0];
-        lines.push(`## Page ${currentPage}`, "");
+        lines.push(`# Page ${currentPage}`, "");
       }
-      renderEntry(lines, entry, vaultName, pdf.path, "###", names);
+      renderEntry(lines, entry, vaultName, pdf.path);
     }
   }
   lines.push(SIDECAR_END, "");
@@ -201,19 +200,21 @@ export class SidecarConflictError extends Error {
   }
 }
 
-function isSidecar(content: string): boolean {
-  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  return !!frontmatter && new RegExp(`^${SIDECAR_MARKER}:\\s*true\\s*$`, "m").test(frontmatter[1]);
+function frontmatterValue(frontmatter: string, key: string): string | null {
+  const raw = frontmatter.match(new RegExp(`^${key}:[ \\t]*(.*?)\\s*$`, "m"))?.[1];
+  if (raw === undefined) return null;
+  try { return String(JSON.parse(raw)); } catch { return raw.replace(/^['"]|['"]$/g, ""); }
 }
 
-/** The PDF path a sidecar was written for, or null if it is not a sidecar. */
+/** The PDF path a sidecar was written for, "" if unknown, or null if the note is not a sidecar. */
 function sidecarOwner(content: string): string | null {
-  if (!isSidecar(content)) return null;
-  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
-  const explicit = frontmatter.match(new RegExp(`^${SIDECAR_PDF_KEY}:\\s*(.+?)\\s*$`, "m"))?.[1];
-  if (explicit) {
-    try { return String(JSON.parse(explicit)); } catch { return explicit; }
-  }
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
+  if (frontmatter === undefined) return null;
+  const pdf = frontmatterValue(frontmatter, SIDECAR_PDF_KEY);
+  if (pdf !== null) return pdf;
+  if (frontmatterValue(frontmatter, LEGACY_MARKER) !== "true") return null;
+  const legacyPath = frontmatterValue(frontmatter, LEGACY_PDF_KEY);
+  if (legacyPath !== null) return legacyPath;
   // Sidecars from 1.0.0–1.0.3 only carry the `pdf: "[[path|name]]"` link.
   return frontmatter.match(/^pdf:\s*"\[\[(.+?)\|/m)?.[1] ?? "";
 }

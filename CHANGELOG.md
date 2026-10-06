@@ -2,6 +2,13 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.8 — 2026-10-06
+
+- New sidecar layout: a link to the PDF, a rule, then a `#` heading per color (or page) with `> Page N: quote`, a `*` bullet for the annotation when there is one, and an **Open in PDF** link. Tags, the title, and the color key are no longer written.
+- Sidecar frontmatter is now a single property, `lumen-pdf: "<pdf path>"`. Sidecars written by earlier versions are still recognised and rewritten in the new format.
+- New **Interface theme** setting, Dark by default: the toolbar, panels, and editors are dark while PDF pages keep the PDF theme (Light by default). Choose **Match PDF theme** for the previous behavior.
+- "Colour" is now spelled "Color" throughout the interface.
+
 ## Mod 1.0.7 — 2026-10-05
 
 - Made colour naming easier to find: a labelled **Colour names** button now sits in the All / Highlights / Notes row. Right-clicking (or long-pressing) a colour chip opens the same window, and so does the **Name highlight colours for this PDF** command.

@@ -20,6 +20,10 @@ import { DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBund
 
 export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
 export type PdfTheme = "light" | "sepia" | "dark";
+/** Theme for the plugin's own panels and toolbars, independent of the PDF page theme. */
+export type InterfaceTheme = "dark" | "light" | "pdf";
+
+const THEME_CLASSES = ["theme-light", "theme-sepia", "theme-dark", "pdf-theme-light", "pdf-theme-sepia", "pdf-theme-dark", "lumod-ui-follow"];
 const CARD_HEIGHT = 132;
 const CARD_OVERSCAN = 5;
 const MAX_INSPECTOR_SCROLL_HEIGHT = 1_000_000;
@@ -348,7 +352,8 @@ export class LumenPdfView extends FileView {
     private readonly legacyAnnotationFolder = "PDF annotations",
     private readonly automaticPdfBackups = false,
     private readonly onReaderReady?: () => void,
-    private readonly sidecarOptions: () => SidecarOptions = () => ({ grouping: "page", autoSync: false }),
+    private readonly sidecarOptions: () => SidecarOptions = () => ({ grouping: "color", autoSync: false }),
+    private readonly interfaceTheme: () => InterfaceTheme = () => "dark",
   ) {
     super(leaf);
     this.theme = initialTheme;
@@ -459,7 +464,7 @@ export class LumenPdfView extends FileView {
     if (generation !== this.documentGeneration) return;
     let colorNames: ColorNames = {};
     try { colorNames = await bundle.repository.loadColorNames(); }
-    catch (error) { console.error("Lumen could not load colour names", error); }
+    catch (error) { console.error("Lumen could not load color names", error); }
     if (generation !== this.documentGeneration) return;
     this.bundle = bundle;
     this.bundleFile = file;
@@ -640,7 +645,8 @@ export class LumenPdfView extends FileView {
 
   private buildShell(file: TFile): void {
     this.contentEl.empty();
-    this.rootEl = this.contentEl.createDiv({ cls: `lumod-reader theme-${this.theme}` });
+    this.rootEl = this.contentEl.createDiv({ cls: "lumod-reader" });
+    this.applyThemeClasses(this.rootEl);
     this.rootEl.classList.toggle("is-mobile", this.mobileRuntime);
     const appAccent = this.getAppAccentColor();
     if (appAccent) this.rootEl.style.setProperty("--lumod-accent", appAccent);
@@ -1114,18 +1120,18 @@ export class LumenPdfView extends FileView {
     }
     const nameColors = filters.createEl("button", {
       cls: "lumod-color-names-button",
-      attr: { "aria-label": "Name highlight colours for this PDF" },
+      attr: { "aria-label": "Name highlight colors for this PDF" },
     });
     setIcon(nameColors.createSpan({ cls: "lumod-color-names-icon" }), "tag");
-    nameColors.createSpan({ text: "Colour names" });
+    nameColors.createSpan({ text: "Color names" });
     nameColors.addEventListener("click", () => this.openColorNamesModal());
     const options = this.inspector.createDiv({ cls: "lumod-inspector-options" });
-    this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by colour" } });
+    this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by color" } });
     const sort = options.createEl("select", { cls: "lumod-inspector-sort", attr: { "aria-label": "Sort annotations" } });
     sort.createEl("option", { value: "newest", text: "Newest" });
     sort.createEl("option", { value: "oldest", text: "Oldest" });
     sort.createEl("option", { value: "page", text: "Page" });
-    sort.createEl("option", { value: "color", text: "Colour" });
+    sort.createEl("option", { value: "color", text: "Color" });
     sort.value = this.inspectorSort;
     sort.addEventListener("change", () => {
       this.inspectorSort = sort.value as typeof this.inspectorSort;
@@ -1147,7 +1153,7 @@ export class LumenPdfView extends FileView {
     const colors = this.knownColors(counts);
     if (this.activeColor !== "all" && !colors.includes(this.activeColor)) this.activeColor = "all";
     this.inspectorColorFilters.empty();
-    const allColors = this.inspectorColorFilters.createEl("button", { cls: "lumod-all-colors", text: "All", attr: { "aria-label": "Show all colours" } });
+    const allColors = this.inspectorColorFilters.createEl("button", { cls: "lumod-all-colors", text: "All", attr: { "aria-label": "Show all colors" } });
     allColors.classList.toggle("is-active", this.activeColor === "all");
     allColors.addEventListener("click", () => this.setInspectorColor("all"));
     for (const color of colors) {
@@ -1601,8 +1607,7 @@ export class LumenPdfView extends FileView {
     this.theme = theme;
     const appAccent = this.getAppAccentColor();
     if (appAccent) this.rootEl.style.setProperty("--lumod-accent", appAccent);
-    this.rootEl.classList.remove("theme-light", "theme-sepia", "theme-dark");
-    this.rootEl.classList.add(`theme-${theme}`);
+    this.applyThemeClasses(this.rootEl);
     if (this.themeButton) {
       this.themeButton.dataset.theme = theme;
       this.themeButton.setAttribute("aria-label", `PDF theme: ${theme}`);
@@ -1613,10 +1618,29 @@ export class LumenPdfView extends FileView {
     if (changed) this.onThemeChange?.(theme);
   }
 
+  /**
+   * `pdf-theme-*` styles the pages. Obsidian's own `theme-dark`/`theme-light`
+   * classes give the plugin's panels that palette; with the "pdf" interface
+   * theme they follow the PDF theme, as in the original plugin.
+   */
+  private applyThemeClasses(element: HTMLElement): void {
+    element.classList.remove(...THEME_CLASSES);
+    element.classList.add(`pdf-theme-${this.theme}`);
+    const ui = this.interfaceTheme();
+    if (ui === "pdf") element.classList.add("lumod-ui-follow", `theme-${this.theme}`);
+    else element.classList.add(`theme-${ui}`);
+  }
+
+  /** Re-apply the interface theme after the setting changes. */
+  refreshInterfaceTheme(): void {
+    if (this.rootEl) this.applyThemeClasses(this.rootEl);
+    this.syncDetachedTheme(this.selectionPalette);
+    this.syncDetachedTheme(this.editor);
+  }
+
   private syncDetachedTheme(surface: HTMLElement | null): void {
     if (!surface) return;
-    surface.classList.remove("theme-light", "theme-sepia", "theme-dark");
-    surface.classList.add(`theme-${this.theme}`);
+    this.applyThemeClasses(surface);
     const appAccent = this.getAppAccentColor();
     if (appAccent) surface.style.setProperty("--lumod-accent", appAccent);
   }
@@ -2601,7 +2625,8 @@ export class LumenPdfView extends FileView {
     if (this.extensionGroupId) this.finishExtension();
     this.closeSelectionPalette();
     this.closeEditor();
-    const editor = this.detachedDocument().body.createDiv({ cls: `lumod-mark-editor theme-${this.theme}` });
+    const editor = this.detachedDocument().body.createDiv({ cls: "lumod-mark-editor" });
+    this.applyThemeClasses(editor);
     this.prepareDetachedSurface(editor);
     if (this.mobileRuntime) {
       editor.setAttribute("role", "dialog");
@@ -3554,7 +3579,7 @@ class ColorNamesModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass("lumod-color-names-modal");
-    this.titleEl.setText("Name highlight colours");
+    this.titleEl.setText("Name highlight colors");
     this.contentEl.createEl("p", {
       cls: "lumod-color-names-help",
       text: `These names apply only to ${this.pdfName} and its sidecar note. Leave a name empty to use the default.`,
@@ -3577,8 +3602,8 @@ class ColorNamesModal extends Modal {
       .addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
       .addButton(button => button.setButtonText("Save").setCta().onClick(() => {
         void this.onSave(this.draft).then(() => this.close()).catch(error => {
-          console.error("Lumen could not save colour names", error);
-          new Notice("Could not save the colour names.");
+          console.error("Lumen could not save color names", error);
+          new Notice("Could not save the color names.");
         });
       }));
   }

@@ -206,16 +206,16 @@
 .lumod-page.is-search-flash .lumod-page-stage {
   box-shadow: 0 0 0 3px var(--interactive-accent), 0 8px 28px rgba(0, 0, 0, .2);
 }
-.theme-sepia .lumod-page-stage {
+.pdf-theme-sepia .lumod-page-stage {
   background: #f4ead2;
 }
-.theme-sepia .lumod-canvas-layer {
+.pdf-theme-sepia .lumod-canvas-layer {
   filter: sepia(.24) saturate(.88);
 }
-.theme-dark .lumod-page-stage {
+.pdf-theme-dark .lumod-page-stage {
   background: #202124;
 }
-.theme-dark .lumod-canvas-layer {
+.pdf-theme-dark .lumod-canvas-layer {
   filter: invert(.9) hue-rotate(180deg) brightness(.82) contrast(.94);
 }
 .lumod-toolbar {
@@ -709,7 +709,7 @@
   padding: 8px 10px 10px;
   border-radius: 14px;
 }
-.lumod-mark-editor.theme-sepia {
+.lumod-mark-editor.lumod-ui-follow.pdf-theme-sepia {
   --background-primary:#2b2923;
   --background-secondary:#343128;
 }
@@ -882,25 +882,25 @@
 .lumod-annotation-card {
   border-color: color-mix(in srgb, var(--mark-color, #888) 64%, var(--lumod-border));
 }
-.lumod-reader.theme-light .lumod-page-stage {
+.lumod-reader.pdf-theme-light .lumod-page-stage {
   background: #fff;
 }
-.lumod-reader.theme-light .lumod-canvas-layer {
+.lumod-reader.pdf-theme-light .lumod-canvas-layer {
   filter: none;
 }
-.lumod-reader.theme-sepia .lumod-page-stage {
+.lumod-reader.pdf-theme-sepia .lumod-page-stage {
   background: #f4ead2;
 }
-.lumod-reader.theme-sepia .lumod-canvas-layer {
+.lumod-reader.pdf-theme-sepia .lumod-canvas-layer {
   filter: sepia(.24) saturate(.88);
 }
-.lumod-reader.theme-dark .lumod-page-stage {
+.lumod-reader.pdf-theme-dark .lumod-page-stage {
   background: #202124;
 }
-.lumod-reader.theme-dark .lumod-canvas-layer {
+.lumod-reader.pdf-theme-dark .lumod-canvas-layer {
   filter: invert(.9) hue-rotate(180deg) brightness(.82) contrast(.94);
 }
-.lumod-mark-editor.theme-light {
+.lumod-mark-editor.lumod-ui-follow.pdf-theme-light {
   --background-primary: #fff;
   --background-secondary: #f3f4f6;
   --background-modifier-border: rgba(28, 33, 40, .16);
@@ -908,7 +908,7 @@
   --text-muted: #68707c;
   --text-error: #d93025;
 }
-.lumod-mark-editor.theme-sepia {
+.lumod-mark-editor.lumod-ui-follow.pdf-theme-sepia {
   --background-primary: #f7f0df;
   --background-secondary: #ede2ca;
   --background-modifier-border: rgba(70, 55, 29, .18);
@@ -916,7 +916,7 @@
   --text-muted: #786b59;
   --text-error: #c44236;
 }
-.lumod-mark-editor.theme-dark {
+.lumod-mark-editor.lumod-ui-follow.pdf-theme-dark {
   --background-primary: #202226;
   --background-secondary: #292c31;
   --background-modifier-border: rgba(255, 255, 255, .14);
@@ -1235,21 +1235,21 @@
   background: var(--mark-color);
   background-color: var(--mark-color);
 }
-.lumod-selection-palette.theme-light {
+.lumod-selection-palette.lumod-ui-follow.pdf-theme-light {
   --background-primary: #fff;
   --background-secondary: #f3f4f6;
   --background-modifier-border: rgba(28, 33, 40, .16);
   --text-normal: #1f242c;
   --text-muted: #68707c;
 }
-.lumod-selection-palette.theme-sepia {
+.lumod-selection-palette.lumod-ui-follow.pdf-theme-sepia {
   --background-primary: #f7f0df;
   --background-secondary: #ede2ca;
   --background-modifier-border: rgba(70, 55, 29, .18);
   --text-normal: #342d22;
   --text-muted: #786b59;
 }
-.lumod-selection-palette.theme-dark {
+.lumod-selection-palette.lumod-ui-follow.pdf-theme-dark {
   --background-primary: #202226;
   --background-secondary: #292c31;
   --background-modifier-border: rgba(255, 255, 255, .14);
