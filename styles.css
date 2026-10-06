@@ -1153,7 +1153,15 @@
   width: 16px;
   height: 16px;
 }
+.lumod-card-tags {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--lumod-accent, var(--interactive-accent));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .lumod-card-color {
+  flex: none;
   margin-left: auto;
   color: var(--lumod-muted);
 }

@@ -20,10 +20,11 @@
 >
 >   # friends
 >
->   > Page 3: the highlighted text #tag (tags go here when there is no annotation)
+>   > Page 3: the highlighted text
+>   * your annotation #tag
+>   > > [Open in PDF](obsidian://lumen-pdf-mod?…)
 >
->   * your annotation, if there is one #tag
->
+>   > Page 5: a highlight without an annotation #tag
 >
 >   > > [Open in PDF](obsidian://lumen-pdf-mod?…)
 >

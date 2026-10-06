@@ -2,6 +2,12 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.10 — 2026-10-06
+
+- Fixed tags being wiped: when the inspector's editor and the floating editor were both open on one annotation, typing a note in one saved its stale (often empty) tags over the tags entered in the other. Each field now saves on its own.
+- Inspector cards show an annotation's tags.
+- Sidecar: no blank lines between the highlighted text, the annotation bullet, and the **Open in PDF** link.
+
 ## Mod 1.0.9 — 2026-10-06
 
 - Sidecar tags are back: they're written at the end of the annotation bullet when there is one, otherwise at the end of the highlighted text. Spaces in tags become hyphens (`#to-read`) so Obsidian recognizes them.

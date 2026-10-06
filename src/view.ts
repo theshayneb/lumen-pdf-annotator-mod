@@ -2677,11 +2677,14 @@ export class LumenPdfView extends FileView {
     note.value = annotation.note;
     const tags = container.createEl("input", { cls: "lumod-tags-input", attr: { placeholder: "Tags, separated by commas", "aria-label": "Annotation tags" } });
     tags.value = annotation.tags.join(", ");
-    const save = () => {
-      this.mutateAnnotation(annotation.id, { note: note.value, tags: parseTags(tags.value) }, false, false);
-    };
-    note.addEventListener("input", save);
-    tags.addEventListener("input", save);
+    // Save only the field being edited. The inspector and the floating editor
+    // can both be open on one annotation; saving both fields from either would
+    // overwrite the other editor's changes with stale values.
+    const saveNote = () => this.mutateAnnotation(annotation.id, { note: note.value }, false, false);
+    const saveTags = () => this.mutateAnnotation(annotation.id, { tags: parseTags(tags.value) }, false, false);
+    note.addEventListener("input", saveNote);
+    tags.addEventListener("input", saveTags);
+    tags.addEventListener("change", saveTags);
     const actions = container.createDiv({ cls: "lumod-editor-actions" });
     actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
     if (annotation.kind !== "page-note") {
@@ -2842,6 +2845,7 @@ export class LumenPdfView extends FileView {
       const meta = card.createDiv({ cls: "lumod-card-meta" });
       meta.createEl("strong", { text: this.annotationPageLabel(item, "p.") });
       meta.createSpan({ text: item.kind === "page-note" ? "page note" : item.note ? "note" : markLabel(item.style) });
+      if (item.tags.length) meta.createSpan({ cls: "lumod-card-tags", text: item.tags.map(tag => `#${tag}`).join(" ") });
       meta.createSpan({ cls: "lumod-card-color", text: colorName(item.color, this.colorNames) });
       if (this.mobileRuntime) {
         const edit = iconButton("pencil", "Edit annotation", () => this.openInspectorDetail(item.id));

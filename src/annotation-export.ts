@@ -129,10 +129,13 @@ function markdownColorName(color: string, names: ColorNames): string {
 /**
  * One annotation:
  *
+ *     > Page 3: highlighted text
+ *     * note #tag
+ *     > > [Open in PDF](obsidian://…)
+ *
+ * or, without a note:
+ *
  *     > Page 3: highlighted text #tag
- *
- *     * note (only when there is one) #tag
- *
  *
  *     > > [Open in PDF](obsidian://…)
  *
@@ -150,12 +153,14 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
     ? quoted.map(member => `> Page ${member.page}: ${member.quote.replace(/\s+/g, " ").trim()}`)
     : [`> Page ${anchor.page}`];
   if (!note) quoteLines[quoteLines.length - 1] = withTags(quoteLines[quoteLines.length - 1]);
-  lines.push(...quoteLines, "");
+  lines.push(...quoteLines);
   if (note) {
     const noteLines = note.trim().split(/\r?\n/);
     noteLines[noteLines.length - 1] = withTags(noteLines[noteLines.length - 1]);
     const [first, ...rest] = noteLines;
-    lines.push(`* ${first}`, ...rest.map(line => line.trim() ? `  ${line}` : ""), "", "");
+    lines.push(`* ${first}`, ...rest.map(line => line.trim() ? `  ${line}` : ""));
+  } else {
+    lines.push("");
   }
   lines.push(`> > [Open in PDF](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)})`, "");
 }
