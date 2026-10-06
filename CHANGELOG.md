@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.11 — 2026-10-06
+
+- New sidecar entry format: one bullet per annotation, `- highlighted text *-- note* #tags *(p. 3)*`, where the page reference links to the annotation in the PDF. The note part appears only when there is a note. Multi-line text and notes are joined into one line.
+
 ## Mod 1.0.10 — 2026-10-06
 
 - Fixed tags being wiped: when the inspector's editor and the floating editor were both open on one annotation, typing a note in one saved its stale (often empty) tags over the tags entered in the other. Each field now saves on its own.

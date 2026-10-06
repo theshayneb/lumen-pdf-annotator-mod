@@ -127,42 +127,29 @@ function markdownColorName(color: string, names: ColorNames): string {
 }
 
 /**
- * One annotation:
+ * One annotation as a single bullet:
  *
- *     > Page 3: highlighted text
- *     * note #tag
- *     > > [Open in PDF](obsidian://…)
+ *     - highlighted text *-- note* #tag *([p. 3](obsidian://…))*
  *
- * or, without a note:
- *
- *     > Page 3: highlighted text #tag
- *
- *     > > [Open in PDF](obsidian://…)
- *
- * Tags go at the end of the note when there is one, otherwise at the end of
- * the highlighted text.
+ * The note part is left out when there is no note; the page link opens the
+ * annotation in the PDF.
  */
 function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
-  const { anchor, members } = entry;
+  const { anchor, members, pages } = entry;
   const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
     ?? members.find(item => item.note.trim())?.note;
   const tags = (members.find(item => item.tags.length)?.tags ?? []).map(tagLabel).join(" ");
-  const withTags = (text: string) => tags ? `${text} ${tags}` : text;
-  const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
-  const quoteLines = quoted.length
-    ? quoted.map(member => `> Page ${member.page}: ${member.quote.replace(/\s+/g, " ").trim()}`)
-    : [`> Page ${anchor.page}`];
-  if (!note) quoteLines[quoteLines.length - 1] = withTags(quoteLines[quoteLines.length - 1]);
-  lines.push(...quoteLines);
-  if (note) {
-    const noteLines = note.trim().split(/\r?\n/);
-    noteLines[noteLines.length - 1] = withTags(noteLines[noteLines.length - 1]);
-    const [first, ...rest] = noteLines;
-    lines.push(`* ${first}`, ...rest.map(line => line.trim() ? `  ${line}` : ""));
-  } else {
-    lines.push("");
-  }
-  lines.push(`> > [Open in PDF](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)})`, "");
+  const quote = members
+    .filter(item => item.kind !== "page-note" && item.quote.trim())
+    .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))
+    .join(" … ");
+  const pageText = pages.length === 1 ? `p. ${pages[0]}` : `pp. ${pages.join(", ")}`;
+  const link = `*([${pageText}](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)}))*`;
+  const parts = [quote || "Page note"];
+  if (note) parts.push(`*-- ${escapeInline(note.replace(/\s+/g, " ").trim())}*`);
+  if (tags) parts.push(tags);
+  parts.push(link);
+  lines.push(`- ${parts.join(" ")}`);
 }
 
 /** Markdown for a sidecar note, grouped by highlight color or by page. */
@@ -193,20 +180,24 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
     for (const color of Array.from(groups.keys()).sort((a, b) => compareColors(a, b, names))) {
       lines.push(`# ${markdownColorName(color, names)}`, "");
       for (const entry of groups.get(color) ?? []) renderEntry(lines, entry, vaultName, pdf.path);
+      lines.push("");
     }
     if (notes.length) {
       lines.push("# Page notes", "");
       for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path);
+      lines.push("");
     }
   } else {
     let currentPage = -1;
     for (const entry of entries) {
       if (entry.pages[0] !== currentPage) {
+        if (currentPage !== -1) lines.push("");
         currentPage = entry.pages[0];
         lines.push(`# Page ${currentPage}`, "");
       }
       renderEntry(lines, entry, vaultName, pdf.path);
     }
+    if (currentPage !== -1) lines.push("");
   }
   lines.push(SIDECAR_END, "");
   return lines.join("\n");

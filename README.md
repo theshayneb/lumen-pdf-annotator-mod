@@ -20,13 +20,8 @@
 >
 >   # friends
 >
->   > Page 3: the highlighted text
->   * your annotation #tag
->   > > [Open in PDF](obsidian://lumen-pdf-mod?…)
->
->   > Page 5: a highlight without an annotation #tag
->
->   > > [Open in PDF](obsidian://lumen-pdf-mod?…)
+>   - the highlighted text *-- your annotation, if there is one* #tag *([p. 3](obsidian://lumen-pdf-mod?…))*
+>   - another highlight #tag *([p. 5](obsidian://lumen-pdf-mod?…))*
 >
 >   %% lumen-sidecar-end: … %%
 >   ```
