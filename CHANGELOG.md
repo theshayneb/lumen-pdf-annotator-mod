@@ -2,6 +2,11 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.9 — 2026-10-06
+
+- Sidecar tags are back: they're written at the end of the annotation bullet when there is one, otherwise at the end of the highlighted text. Spaces in tags become hyphens (`#to-read`) so Obsidian recognizes them.
+- The sidecar's **Open in PDF** link is now a nested quote: `> > [Open in PDF](…)`.
+
 ## Mod 1.0.8 — 2026-10-06
 
 - New sidecar layout: a link to the PDF, a rule, then a `#` heading per color (or page) with `> Page N: quote`, a `*` bullet for the annotation when there is one, and an **Open in PDF** link. Tags, the title, and the color key are no longer written.

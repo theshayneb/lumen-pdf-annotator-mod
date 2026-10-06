@@ -112,6 +112,13 @@ function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
+function tagLabel(tag: string): string {
+  // Obsidian tags cannot contain spaces, so "to read" becomes #to-read. Tags
+  // that still are not valid (e.g. only digits) are written as plain text.
+  const value = tag.trim().replace(/^#/, "").replace(/\s+/g, "-");
+  return /^[\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*$/u.test(value) ? `#${value}` : escapeInline(value);
+}
+
 /** A color label that Obsidian will not mistake for a tag. */
 function markdownColorName(color: string, names: ColorNames): string {
   if (hasCustomColorName(color, names)) return escapeInline(colorName(color, names)).replace(/(^|\s)#/g, "$1\\#");
@@ -122,29 +129,35 @@ function markdownColorName(color: string, names: ColorNames): string {
 /**
  * One annotation:
  *
- *     > Page 3: highlighted text
+ *     > Page 3: highlighted text #tag
  *
- *     * note (only when there is one)
+ *     * note (only when there is one) #tag
  *
  *
- *     [Open in PDF](obsidian://…)
+ *     > > [Open in PDF](obsidian://…)
+ *
+ * Tags go at the end of the note when there is one, otherwise at the end of
+ * the highlighted text.
  */
 function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
   const { anchor, members } = entry;
-  const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
-  if (quoted.length) {
-    for (const member of quoted) lines.push(`> Page ${member.page}: ${member.quote.replace(/\s+/g, " ").trim()}`);
-  } else {
-    lines.push(`> Page ${anchor.page}`);
-  }
-  lines.push("");
   const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
     ?? members.find(item => item.note.trim())?.note;
+  const tags = (members.find(item => item.tags.length)?.tags ?? []).map(tagLabel).join(" ");
+  const withTags = (text: string) => tags ? `${text} ${tags}` : text;
+  const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
+  const quoteLines = quoted.length
+    ? quoted.map(member => `> Page ${member.page}: ${member.quote.replace(/\s+/g, " ").trim()}`)
+    : [`> Page ${anchor.page}`];
+  if (!note) quoteLines[quoteLines.length - 1] = withTags(quoteLines[quoteLines.length - 1]);
+  lines.push(...quoteLines, "");
   if (note) {
-    const [first, ...rest] = note.trim().split(/\r?\n/);
+    const noteLines = note.trim().split(/\r?\n/);
+    noteLines[noteLines.length - 1] = withTags(noteLines[noteLines.length - 1]);
+    const [first, ...rest] = noteLines;
     lines.push(`* ${first}`, ...rest.map(line => line.trim() ? `  ${line}` : ""), "", "");
   }
-  lines.push(`[Open in PDF](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)})`, "");
+  lines.push(`> > [Open in PDF](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)})`, "");
 }
 
 /** Markdown for a sidecar note, grouped by highlight color or by page. */
