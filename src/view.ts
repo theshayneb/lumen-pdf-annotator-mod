@@ -354,6 +354,7 @@ export class LumenPdfView extends FileView {
     private readonly onReaderReady?: () => void,
     private readonly sidecarOptions: () => SidecarOptions = () => ({ grouping: "color", autoSync: false }),
     private readonly interfaceTheme: () => InterfaceTheme = () => "dark",
+    private readonly openInspectorOnLoad: () => boolean = () => true,
   ) {
     super(leaf);
     this.theme = initialTheme;
@@ -475,6 +476,8 @@ export class LumenPdfView extends FileView {
     bundle.repository.onChange = () => this.scheduleSidecarSync();
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
     this.refreshInspector();
+    // On phones the panel covers the page, so it stays closed there.
+    if (this.openInspectorOnLoad() && !Platform.isPhone && !this.inspector.classList.contains("is-open")) this.toggleInspector();
     window.setTimeout(() => {
       if (generation === this.documentGeneration) void this.loadOutline(generation);
     }, 0);
@@ -2853,8 +2856,17 @@ export class LumenPdfView extends FileView {
         edit.addEventListener("keydown", event => event.stopPropagation());
         meta.append(edit);
       }
-      card.createDiv({ cls: "lumod-card-note", text: item.note || item.quote });
-      if (item.note) card.createDiv({ cls: "lumod-card-quote", text: item.quote });
+      // Highlighted text first, styled the same with or without a note; the
+      // note follows in regular weight. Page notes have no text of their own.
+      if (item.kind === "page-note") {
+        card.createDiv({ cls: "lumod-card-note", text: item.note || item.quote });
+      } else {
+        const main = card.createDiv({ cls: "lumod-card-note", text: item.quote });
+        if (item.note) {
+          main.addClass("has-annotation");
+          card.createDiv({ cls: "lumod-card-annotation", text: item.note });
+        }
+      }
       const activate = () => {
         this.goToPage(item.page, "smooth", this.mobileRuntime ? item.rects[0]?.y : undefined);
         this.flashAnnotation(item.id);

@@ -2,6 +2,11 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.12 — 2026-10-06
+
+- Annotation cards show the highlighted text first, styled the same whether or not there is a note; the note follows below in regular weight.
+- The annotations panel opens automatically when a PDF opens (except on phones). Turn this off with **Open the annotations panel automatically** in settings.
+
 ## Mod 1.0.11 — 2026-10-06
 
 - New sidecar entry format: one bullet per annotation, `- highlighted text *-- note* #tags *(p. 3)*`, where the page reference links to the annotation in the PDF. The note part appears only when there is a note. Multi-line text and notes are joined into one line.

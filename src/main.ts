@@ -11,6 +11,7 @@ interface LumenSettings {
   defaultViewer: boolean;
   pdfTheme: PdfTheme;
   interfaceTheme: InterfaceTheme;
+  openAnnotationsPanel: boolean;
   legacyAnnotationFolder: string;
   automaticPdfBackups: boolean;
   sidecarGrouping: SidecarGrouping;
@@ -21,6 +22,7 @@ const DEFAULT_SETTINGS: LumenSettings = {
   defaultViewer: true,
   pdfTheme: "light",
   interfaceTheme: "dark",
+  openAnnotationsPanel: true,
   legacyAnnotationFolder: "PDF annotations",
   automaticPdfBackups: false,
   sidecarGrouping: "color",
@@ -46,6 +48,7 @@ function readSettings(value: unknown): LumenSettings {
     defaultViewer: typeof stored.defaultViewer === "boolean" ? stored.defaultViewer : DEFAULT_SETTINGS.defaultViewer,
     pdfTheme: isPdfTheme(stored.pdfTheme) ? stored.pdfTheme : DEFAULT_SETTINGS.pdfTheme,
     interfaceTheme: isInterfaceTheme(stored.interfaceTheme) ? stored.interfaceTheme : DEFAULT_SETTINGS.interfaceTheme,
+    openAnnotationsPanel: typeof stored.openAnnotationsPanel === "boolean" ? stored.openAnnotationsPanel : DEFAULT_SETTINGS.openAnnotationsPanel,
     legacyAnnotationFolder: typeof stored.legacyAnnotationFolder === "string" ? stored.legacyAnnotationFolder : DEFAULT_SETTINGS.legacyAnnotationFolder,
     automaticPdfBackups: typeof stored.automaticPdfBackups === "boolean" ? stored.automaticPdfBackups : DEFAULT_SETTINGS.automaticPdfBackups,
     sidecarGrouping: isSidecarGrouping(stored.sidecarGrouping) ? stored.sidecarGrouping : DEFAULT_SETTINGS.sidecarGrouping,
@@ -78,6 +81,7 @@ export default class LumenPdfPlugin extends Plugin {
       () => this.viewState.attach(leaf),
       () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoSync }),
       () => this.settings.interfaceTheme,
+      () => this.settings.openAnnotationsPanel,
     ));
     if (this.settings.defaultViewer) this.installAsDefaultPdfViewer();
     this.registerObsidianProtocolHandler(LUMEN_PROTOCOL_ACTION, params => void this.openAnnotationLink(params).catch(error => {
@@ -311,6 +315,11 @@ class LumenSettingTab extends PluginSettingTab {
         control: { type: "dropdown", key: "interfaceTheme", options: { dark: "Dark", light: "Light", pdf: "Match PDF theme" }, defaultValue: DEFAULT_SETTINGS.interfaceTheme },
       },
       {
+        name: "Open the annotations panel automatically",
+        desc: "Show the annotations panel whenever a PDF opens. It stays closed on phones, where it would cover the page.",
+        control: { type: "toggle", key: "openAnnotationsPanel", defaultValue: DEFAULT_SETTINGS.openAnnotationsPanel },
+      },
+      {
         name: "Legacy annotation folder",
         desc: "Look here for older Markdown annotation notes that target the open PDF.",
         control: { type: "text", key: "legacyAnnotationFolder", placeholder: "PDF annotations", defaultValue: DEFAULT_SETTINGS.legacyAnnotationFolder },
@@ -344,6 +353,7 @@ class LumenSettingTab extends PluginSettingTab {
     if (key === "defaultViewer") return this.plugin.settings.defaultViewer;
     if (key === "pdfTheme") return this.plugin.settings.pdfTheme;
     if (key === "interfaceTheme") return this.plugin.settings.interfaceTheme;
+    if (key === "openAnnotationsPanel") return this.plugin.settings.openAnnotationsPanel;
     if (key === "legacyAnnotationFolder") return this.plugin.settings.legacyAnnotationFolder;
     if (key === "automaticPdfBackups") return this.plugin.settings.automaticPdfBackups;
     if (key === "sidecarGrouping") return this.plugin.settings.sidecarGrouping;
@@ -360,6 +370,10 @@ class LumenSettingTab extends PluginSettingTab {
     }
     if (key === "pdfTheme" && isPdfTheme(value)) return this.plugin.setPdfTheme(value);
     if (key === "interfaceTheme" && isInterfaceTheme(value)) return this.plugin.setInterfaceTheme(value);
+    if (key === "openAnnotationsPanel" && typeof value === "boolean") {
+      this.plugin.settings.openAnnotationsPanel = value;
+      return this.plugin.saveSettings();
+    }
     if (key === "legacyAnnotationFolder" && typeof value === "string") {
       this.plugin.settings.legacyAnnotationFolder = value.trim().replace(/^\/+|\/+$/g, "") || "PDF annotations";
       return this.plugin.saveSettings();

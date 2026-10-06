@@ -616,6 +616,26 @@
   font-weight: 560;
   line-height: 1.35;
 }
+.lumod-card-note.has-annotation {
+  -webkit-line-clamp: 2;
+}
+.lumod-card-annotation {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--lumod-border);
+  color: var(--lumod-text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+.lumod-reader.is-mobile .lumod-card-annotation {
+  font-size: 13px;
+}
 .lumod-card-quote {
   -webkit-line-clamp: 3;
   margin-top: 5px;
