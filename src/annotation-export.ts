@@ -129,11 +129,11 @@ function markdownColorName(color: string, names: ColorNames): string {
 /**
  * One annotation as a bullet, with its note (if any) as a nested quote item:
  *
- *     - highlighted text *([pg. 3](obsidian://…))*
- *     	- ["] note #tag
+ *     - highlighted text #tag *([pg. 3](obsidian://…))*
+ *     	- ["] note
  *
- * Tags go on the note when there is one, otherwise after the highlighted text.
- * The page link opens the annotation in the PDF.
+ * Tags always follow the highlighted text. The page link opens the annotation
+ * in the PDF.
  */
 function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
   const { anchor, members, pages } = entry;
@@ -147,12 +147,12 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
   const pageText = pages.length === 1 ? `pg. ${pages[0]}` : `pgs. ${pages.join(", ")}`;
   const link = `*([${pageText}](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)}))*`;
   const highlight = [quote || "Page note"];
-  if (tags && !note) highlight.push(tags);
+  if (tags) highlight.push(tags);
   highlight.push(link);
   lines.push(`- ${highlight.join(" ")}`);
   if (note) {
     const noteText = escapeInline(note.replace(/\s+/g, " ").trim());
-    lines.push(`\t- ["] ${tags ? `${noteText} ${tags}` : noteText}`);
+    lines.push(`\t- ["] ${noteText}`);
   }
 }
 

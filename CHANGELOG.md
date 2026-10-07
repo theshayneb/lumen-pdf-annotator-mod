@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.14 — 2026-10-07
+
+- Sidecar tags always go on the highlight line (before the page link), whether or not there is a note.
+
 ## Mod 1.0.13 — 2026-10-07
 
 - Sidecar color headings are shown in their highlight color.
