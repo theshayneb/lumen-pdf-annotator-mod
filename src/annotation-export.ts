@@ -68,8 +68,9 @@ export async function writeAnnotationExport(vault: Vault, path: string, index: A
       }
       batch.push(`### ${entryNumber + 1}. ${styleLabel(anchor)} · ${pageLabel(pages)}`, "");
       const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
-      for (const member of quoted) {
-        if (pages.length > 1) batch.push(`*Page ${member.page}*`, "");
+      const sameQuote = new Set(quoted.map(member => member.quote.trim())).size === 1;
+      for (const member of sameQuote ? quoted.slice(0, 1) : quoted) {
+        if (pages.length > 1 && !sameQuote) batch.push(`*Page ${member.page}*`, "");
         batch.push(...quoteLines(member.quote), "");
       }
       const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
@@ -140,9 +141,10 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
   const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
     ?? members.find(item => item.note.trim())?.note;
   const tags = (members.find(item => item.tags.length)?.tags ?? []).map(tagLabel).join(" ");
-  const quote = members
+  // Parts of one annotation on several pages usually share the full quote.
+  const quote = Array.from(new Set(members
     .filter(item => item.kind !== "page-note" && item.quote.trim())
-    .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))
+    .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))))
     .join(" … ");
   const pageText = pages.length === 1 ? `pg. ${pages[0]}` : `pgs. ${pages.join(", ")}`;
   const link = `*([${pageText}](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)}))*`;

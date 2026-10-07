@@ -2,6 +2,11 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.19 — 2026-10-07
+
+- A highlight across a page break is now one annotation: one card in the panel with a page range header (e.g. "p. 4–5"), one entry in the sidecar, and one editor for its note and tags. Highlights split by earlier versions are joined automatically when the PDF opens (keeping any note or tags).
+- Exports no longer repeat the same text for each page of a multi-page annotation.
+
 ## Mod 1.0.18 — 2026-10-07
 
 - Fixed highlights that cross a page break covering both entire pages. The selection's boxes now come only from the selected text, not from the page layers the selection passes over. Existing highlights with whole-page boxes are cleaned up when they load.

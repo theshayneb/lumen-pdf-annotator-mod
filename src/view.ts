@@ -479,6 +479,7 @@ export class LumenPdfView extends FileView {
     this.colorOrder = colorOrder;
     this.colorNamesVersion++;
     this.sidecarConflictReported = false;
+    this.groupSplitHighlights();
     bundle.repository.onChange = () => this.scheduleSidecarSync();
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
     this.refreshInspector();
@@ -2372,8 +2373,12 @@ export class LumenPdfView extends FileView {
   private commitSelection(style: MarkStyle, color: string, openEditor: boolean): void {
     if (!this.selection || !this.bundle) return;
     let first: PdfAnnotation | null = null;
-    for (const [page, rects] of this.selection.pages) {
+    // A selection across a page break is one logical annotation: the parts on
+    // later pages join the first part's group, as extended annotations do.
+    const pages = Array.from(this.selection.pages.entries()).sort((a, b) => a[0] - b[0]);
+    for (const [page, rects] of pages) {
       const annotation = newAnnotation(page, rects, this.selection.quote, color, style);
+      if (first) annotation.groupId = first.id;
       this.index.put(annotation);
       this.bundle.repository.queue({ op: "put", annotation });
       this.renderMarks(page);
@@ -2386,6 +2391,39 @@ export class LumenPdfView extends FileView {
     if (openEditor && first) {
       const mark = this.pages.get(first.page)?.markHost?.querySelector<HTMLElement>(`[data-annotation-id="${first.id}"]`);
       if (mark) this.openEditor(first, mark);
+    }
+  }
+
+  /**
+   * Before 1.0.19 a selection across a page break was saved as separate,
+   * ungrouped annotations (one per page) with the same quote and creation time.
+   * Join those into one logical annotation so they list and export once.
+   */
+  private groupSplitHighlights(): void {
+    if (!this.bundle) return;
+    const candidates = new Map<string, PdfAnnotation[]>();
+    for (const item of this.index.all()) {
+      if (item.groupId || item.kind === "page-note" || !item.quote.trim()) continue;
+      const key = `${item.createdAt}\u0000${item.quote}\u0000${item.color}\u0000${item.style}`;
+      const list = candidates.get(key) ?? [];
+      list.push(item);
+      candidates.set(key, list);
+    }
+    for (const list of candidates.values()) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => a.page - b.page);
+      const consecutive = list.every((item, index) => index === 0 || item.page === list[index - 1].page + 1);
+      if (!consecutive) continue;
+      const anchor = list[0];
+      const note = list.find(item => item.note.trim())?.note ?? "";
+      const tags = list.find(item => item.tags.length)?.tags ?? [];
+      for (const item of list) {
+        const updated = { ...item, groupId: item === anchor ? undefined : anchor.id, note, tags: tags.slice() };
+        if (item !== anchor || note !== item.note || tags.length !== item.tags.length) {
+          this.index.put(updated);
+          this.bundle.repository.queue({ op: "put", annotation: updated });
+        }
+      }
     }
   }
 
