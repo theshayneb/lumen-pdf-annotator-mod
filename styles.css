@@ -1175,6 +1175,45 @@
 .lumod-sidecar-order-row .lumod-icon-button:disabled {
   opacity: .3;
 }
+.lumod-color-row {
+  flex-wrap: wrap;
+}
+.lumod-color-picker {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.lumod-add-color {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lumod-add-color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lumod-add-color-chip {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  background: var(--mark-color) !important;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+}
+.lumod-add-color-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lumod-add-color-custom input[type="text"] {
+  width: 110px;
+}
 .lumod-color-names-help {
   color: var(--text-muted);
 }

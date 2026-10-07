@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.20 — 2026-10-07
+
+- Add highlight colors per PDF: the **Color names** window (now titled "Highlight colors") can add up to 12 extra colors from light-page-friendly presets or any hex value (color picker or typed). Added colors appear in the selection palette, the editor, the color filter, and the sidecar. They can be renamed, changed (existing highlights in that color follow), or removed (existing highlights keep their color).
+
 ## Mod 1.0.19 — 2026-10-07
 
 - A highlight across a page break is now one annotation: one card in the panel with a page range header (e.g. "p. 4–5"), one entry in the sidecar, and one editor for its note and tags. Highlights split by earlier versions are joined automatically when the PDF opens (keeping any note or tags).

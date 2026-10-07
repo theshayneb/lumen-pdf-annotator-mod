@@ -100,6 +100,30 @@ export function normalizeColorOrder(value: unknown): string[] {
   return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim().toLowerCase())));
 }
 
+/** Suggested extra highlight colors that read well on light pages. */
+export const PRESET_EXTRA_COLORS = ["#ffa94d", "#ff8787", "#63e6be", "#66d9e8", "#c0eb75", "#b197fc", "#d4a373", "#ced4da"] as const;
+export const MAX_EXTRA_COLORS = 12;
+
+/** A `#rrggbb` color in lower case, or null for anything else. */
+export function normalizeHexColor(value: string): string | null {
+  const match = value.trim().toLowerCase().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (!match) return null;
+  const hex = match[1].length === 3 ? match[1].split("").map(char => char + char).join("") : match[1];
+  return `#${hex}`;
+}
+
+/** Extra palette colors for one PDF: valid, unique, not already built in. */
+export function normalizeExtraColors(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const builtIn = new Set<string>(MARK_COLORS);
+  const result: string[] = [];
+  for (const item of value) {
+    const color = typeof item === "string" ? normalizeHexColor(item) : null;
+    if (color && !builtIn.has(color) && !result.includes(color)) result.push(color);
+  }
+  return result.slice(0, MAX_EXTRA_COLORS);
+}
+
 export function normalizeColorNames(value: unknown): ColorNames {
   const names: ColorNames = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return names;
