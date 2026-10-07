@@ -116,10 +116,7 @@ export default class LumenPdfPlugin extends Plugin {
       const path = await view.exportAnnotations();
       if (path) new Notice(`Annotations exported to ${path}`);
     });
-    this.addReaderCommand("export-annotations-sidecar", "Export annotations to sidecar Markdown note", async view => {
-      const path = await view.exportSidecar();
-      if (path) new Notice(`Annotations exported to ${path}`);
-    });
+    this.addReaderCommand("export-annotations-sidecar", "Export annotations to sidecar Markdown note", view => view.chooseSidecarExport());
     this.addReaderCommand("import-legacy-annotations", "Import legacy annotations for this PDF", view => view.importLegacyAnnotations(true));
     this.addCommand({ id: "verify-pdf-backups", name: "Verify all PDF backup checksums", callback: () => void this.verifyAllBackups() });
     this.addCommand({ id: "restore-backed-up-pdf", name: "Restore a backed-up PDF", callback: () => void this.chooseBackupToRestore() });

@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.15 — 2026-10-07
+
+- Exporting a color-grouped sidecar now opens **Order sidecar headings**, where you can move each color heading up or down before exporting. The order is saved per PDF (in its bundle) and used for automatic sidecar updates; **Default order** restores "important" first, then named colors alphabetically, then the palette.
+
 ## Mod 1.0.14 — 2026-10-07
 
 - Sidecar tags always go on the highlight line (before the page link), whether or not there is a note.

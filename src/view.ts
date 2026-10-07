@@ -2,7 +2,7 @@ import { FileView, Menu, Modal, Notice, Platform, Scope, setIcon, Setting, TFile
 import type { PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { TextLayer } from "pdfjs-dist/types/src/display/text_layer";
 import { annotationMarkdownLink } from "./links";
-import { AnnotationIndex, colorName, ColorNames, compareColors, hasCustomColorName, MARK_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
+import { AnnotationIndex, colorName, ColorNames, compareColors, hasCustomColorName, MARK_COLORS, orderColors, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
 import { annotationTarget, comparableFileName, QuoteAnnotationRecord, quoteAnnotations } from "./legacy";
 import { loadPdf } from "./pdf-runtime";
 import {
@@ -294,6 +294,8 @@ export class LumenPdfView extends FileView {
   // Names for highlight colours in this PDF only, stored in its bundle.
   private colorNames: ColorNames = {};
   private colorNamesVersion = 0;
+  // Heading order chosen for this PDF's sidecar, stored in its bundle.
+  private colorOrder: string[] = [];
   // The PDF that `bundle` and `index` belong to. `this.file` already points at
   // the next PDF while the previous one is being torn down.
   private bundleFile: TFile | null = null;
@@ -464,13 +466,17 @@ export class LumenPdfView extends FileView {
     const index = await indexPromise;
     if (generation !== this.documentGeneration) return;
     let colorNames: ColorNames = {};
-    try { colorNames = await bundle.repository.loadColorNames(); }
-    catch (error) { console.error("Lumen could not load color names", error); }
+    let colorOrder: string[] = [];
+    try {
+      colorNames = await bundle.repository.loadColorNames();
+      colorOrder = await bundle.repository.loadColorOrder();
+    } catch (error) { console.error("Lumen could not load color names", error); }
     if (generation !== this.documentGeneration) return;
     this.bundle = bundle;
     this.bundleFile = file;
     this.index = index;
     this.colorNames = colorNames;
+    this.colorOrder = colorOrder;
     this.colorNamesVersion++;
     this.sidecarConflictReported = false;
     bundle.repository.onChange = () => this.scheduleSidecarSync();
@@ -619,7 +625,35 @@ export class LumenPdfView extends FileView {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;
     if (!this.bundle || !this.bundleFile) return null;
-    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames);
+    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder);
+  }
+
+  /**
+   * Export the sidecar, first letting the user order its color headings when
+   * it is grouped by color. The chosen order is saved for this PDF.
+   */
+  chooseSidecarExport(): void {
+    if (!this.bundle || !this.bundleFile) return;
+    const exportNow = () => void this.exportSidecar().then(path => {
+      if (path) new Notice(`Annotations exported to ${path}`);
+    }).catch(error => {
+      console.error("Lumen could not export the sidecar note", error);
+      new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);
+    });
+    const counts = new Map<string, number>();
+    for (const item of this.index.logicalAll()) {
+      if (item.kind !== "page-note") counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
+    }
+    if (this.sidecarOptions().grouping !== "color" || counts.size < 2) {
+      exportNow();
+      return;
+    }
+    const colors = orderColors(Array.from(counts.keys()), this.colorNames, this.colorOrder);
+    new SidecarOrderModal(this, colors, counts, this.colorNames, async order => {
+      this.colorOrder = order.map(color => color.toLowerCase());
+      await this.bundle?.repository.saveColorOrder(this.colorOrder);
+      exportNow();
+    }).open();
   }
 
   private scheduleSidecarSync(): void {
@@ -1080,14 +1114,7 @@ export class LumenPdfView extends FileView {
     const header = this.inspector.createDiv({ cls: "lumod-panel-header" });
     header.createSpan({ text: "Annotations" });
     this.annotationCount = header.createSpan({ cls: "lumod-count", text: "0" });
-    const sidecarButton = iconButton("file-down", "Export to sidecar Markdown note", () => {
-      void this.exportSidecar().then(path => {
-        if (path) new Notice(`Annotations exported to ${path}`);
-      }).catch(error => {
-        console.error("Lumen could not export the sidecar note", error);
-        new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);
-      });
-    });
+    const sidecarButton = iconButton("file-down", "Export to sidecar Markdown note", () => this.chooseSidecarExport());
     sidecarButton.addClass("lumod-sidecar-button");
     header.append(sidecarButton);
     header.append(iconButton("x", "Close annotations", () => this.toggleInspector()));
@@ -3572,6 +3599,7 @@ export class LumenPdfView extends FileView {
     this.bundle = null;
     this.bundleFile = null;
     this.colorNames = {};
+    this.colorOrder = [];
     this.colorNamesVersion++;
     this.index = new AnnotationIndex();
     this.contentEl.empty();
@@ -3622,6 +3650,73 @@ class ColorNamesModal extends Modal {
           new Notice("Could not save the color names.");
         });
       }));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Choose the order of a sidecar note's color headings, then export. */
+class SidecarOrderModal extends Modal {
+  private order: string[];
+  private listEl!: HTMLElement;
+
+  constructor(
+    view: LumenPdfView,
+    colors: string[],
+    private readonly counts: Map<string, number>,
+    private readonly names: ColorNames,
+    private readonly onExport: (order: string[]) => Promise<void>,
+  ) {
+    super(view.app);
+    this.order = colors.slice();
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("lumod-sidecar-order-modal");
+    this.titleEl.setText("Order sidecar headings");
+    this.contentEl.createEl("p", {
+      cls: "lumod-color-names-help",
+      text: "Move headings up or down. This order is saved for this PDF and used for automatic updates too.",
+    });
+    this.listEl = this.contentEl.createDiv({ cls: "lumod-sidecar-order-list" });
+    this.renderList();
+    new Setting(this.contentEl)
+      .addButton(button => button.setButtonText("Default order").onClick(() => {
+        this.order = orderColors(this.order, this.names);
+        this.renderList();
+      }))
+      .addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton(button => button.setButtonText("Export").setCta().onClick(() => {
+        void this.onExport(this.order).then(() => this.close()).catch(error => {
+          console.error("Lumen could not save the heading order", error);
+          new Notice("Could not save the heading order.");
+        });
+      }));
+  }
+
+  private move(index: number, delta: number): void {
+    const target = index + delta;
+    if (target < 0 || target >= this.order.length) return;
+    [this.order[index], this.order[target]] = [this.order[target], this.order[index]];
+    this.renderList();
+  }
+
+  private renderList(): void {
+    this.listEl.empty();
+    this.order.forEach((color, index) => {
+      const row = this.listEl.createDiv({ cls: "lumod-sidecar-order-row" });
+      const swatch = row.createSpan({ cls: "lumod-color-names-swatch" });
+      swatch.style.setProperty("--mark-color", color);
+      row.createSpan({ cls: "lumod-sidecar-order-name", text: colorName(color, this.names) });
+      row.createSpan({ cls: "lumod-sidecar-order-count", text: String(this.counts.get(color) ?? 0) });
+      const up = iconButton("arrow-up", `Move ${colorName(color, this.names)} up`, () => this.move(index, -1));
+      const down = iconButton("arrow-down", `Move ${colorName(color, this.names)} down`, () => this.move(index, 1));
+      up.disabled = index === 0;
+      down.disabled = index === this.order.length - 1;
+      row.append(up, down);
+    });
   }
 
   onClose(): void {

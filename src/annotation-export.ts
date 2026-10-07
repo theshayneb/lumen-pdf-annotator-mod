@@ -1,7 +1,7 @@
 import { normalizePath, TFile } from "obsidian";
 import type { Vault } from "obsidian";
 import { annotationUri } from "./links";
-import { colorName, compareColors, hasCustomColorName } from "./model";
+import { colorName, hasCustomColorName, orderColors } from "./model";
 import type { ColorNames } from "./model";
 import type { AnnotationIndex, PdfAnnotation } from "./model";
 
@@ -170,7 +170,7 @@ function colorHeading(color: string, names: ColorNames): string {
 }
 
 /** Markdown for a sidecar note, grouped by highlight color or by page. */
-export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping, names: ColorNames = {}): Promise<string> {
+export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = []): Promise<string> {
   const entries = await exportEntries(index);
   const lines = [
     "---",
@@ -194,7 +194,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
       group.push(entry);
       groups.set(entry.anchor.color, group);
     }
-    for (const color of Array.from(groups.keys()).sort((a, b) => compareColors(a, b, names))) {
+    for (const color of orderColors(Array.from(groups.keys()), names, order)) {
       lines.push(colorHeading(color, names), "");
       for (const entry of groups.get(color) ?? []) renderEntry(lines, entry, vaultName, pdf.path);
       lines.push("");
@@ -267,9 +267,9 @@ export async function sidecarPath(vault: Vault, pdf: TFile): Promise<string> {
  * when they are this PDF's sidecar, and text the user added below the end
  * marker is carried over.
  */
-export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}): Promise<string> {
+export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = []): Promise<string> {
   const path = await sidecarPath(vault, pdf);
-  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping, names);
+  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping, names, order);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
     await vault.process(existing, content => {

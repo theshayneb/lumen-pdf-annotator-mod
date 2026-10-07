@@ -1147,6 +1147,34 @@
   background: var(--mark-color);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
 }
+.lumod-sidecar-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.lumod-sidecar-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+.lumod-sidecar-order-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lumod-sidecar-order-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lumod-sidecar-order-row .lumod-icon-button:disabled {
+  opacity: .3;
+}
 .lumod-color-names-help {
   color: var(--text-muted);
 }

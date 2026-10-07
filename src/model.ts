@@ -81,6 +81,25 @@ export function compareColors(a: string, b: string, names?: ColorNames): number 
   return rank(a) - rank(b) || a.toLowerCase().localeCompare(b.toLowerCase());
 }
 
+/**
+ * Sort colors by a chosen order (lower-case color values); colors missing from
+ * it follow in the default `compareColors` order.
+ */
+export function orderColors(colors: string[], names?: ColorNames, order: string[] = []): string[] {
+  const rank = new Map(order.map((color, index) => [color.toLowerCase(), index]));
+  return colors.slice().sort((a, b) => {
+    const rankA = rank.get(a.toLowerCase()) ?? Number.POSITIVE_INFINITY;
+    const rankB = rank.get(b.toLowerCase()) ?? Number.POSITIVE_INFINITY;
+    if (rankA !== rankB) return rankA < rankB ? -1 : 1;
+    return compareColors(a, b, names);
+  });
+}
+
+export function normalizeColorOrder(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim().toLowerCase())));
+}
+
 export function normalizeColorNames(value: unknown): ColorNames {
   const names: ColorNames = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return names;
