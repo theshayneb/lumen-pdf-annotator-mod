@@ -1,7 +1,7 @@
 {
   "id": "lumen-pdf-annotator-mod",
   "name": "Lumen PDF Annotator Mod",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "minAppVersion": "1.13.7",
   "description": "A fork of Lumen PDF Annotator that adds colour-based annotation views and sidecar Markdown exports.",
   "author": "theshayneb (fork of Lumen by Ben Gutteridge)",

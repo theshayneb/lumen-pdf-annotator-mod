@@ -628,14 +628,32 @@ export class LumenPdfView extends FileView {
     return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder);
   }
 
+  /** Show the sidecar note: focus its tab if it is already open, else open it in a new tab. */
+  private async openSidecar(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return;
+    let existing: WorkspaceLeaf | null = null;
+    this.app.workspace.iterateAllLeaves(leaf => {
+      const view = leaf.view as { file?: TFile | null };
+      if (!existing && view.file?.path === file.path) existing = leaf;
+    });
+    if (existing) {
+      await this.app.workspace.revealLeaf(existing);
+      return;
+    }
+    await this.app.workspace.getLeaf("tab").openFile(file);
+  }
+
   /**
    * Export the sidecar, first letting the user order its color headings when
    * it is grouped by color. The chosen order is saved for this PDF.
    */
   chooseSidecarExport(): void {
     if (!this.bundle || !this.bundleFile) return;
-    const exportNow = () => void this.exportSidecar().then(path => {
-      if (path) new Notice(`Annotations exported to ${path}`);
+    const exportNow = () => void this.exportSidecar().then(async path => {
+      if (!path) return;
+      new Notice(`Annotations exported to ${path}`);
+      await this.openSidecar(path);
     }).catch(error => {
       console.error("Lumen could not export the sidecar note", error);
       new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);

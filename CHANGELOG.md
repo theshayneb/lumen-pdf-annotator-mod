@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.17 — 2026-10-07
+
+- After a manual sidecar export, the sidecar note opens in a new tab (or its existing tab is brought forward). Automatic updates don't open it.
+
 ## Mod 1.0.16 — 2026-10-07
 
 - Sidecar notes are italic: `- ["] *note*`.
