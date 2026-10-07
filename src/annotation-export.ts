@@ -130,7 +130,7 @@ function markdownColorName(color: string, names: ColorNames): string {
  * One annotation as a bullet, with its note (if any) as a nested quote item:
  *
  *     - highlighted text #tag *([pg. 3](obsidian://…))*
- *     	- ["] note
+ *     	- ["] *note*
  *
  * Tags always follow the highlighted text. The page link opens the annotation
  * in the PDF.
@@ -152,7 +152,7 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
   lines.push(`- ${highlight.join(" ")}`);
   if (note) {
     const noteText = escapeInline(note.replace(/\s+/g, " ").trim());
-    lines.push(`\t- ["] ${noteText}`);
+    lines.push(`\t- ["] *${noteText}*`);
   }
 }
 

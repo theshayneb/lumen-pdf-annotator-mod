@@ -21,7 +21,7 @@
 >   # <span style="color: #ffd12d">friends</span>
 >
 >   - the highlighted text #tag *([pg. 3](obsidian://lumen-pdf-mod?…))*
->   	- ["] your annotation, if there is one
+>   	- ["] *your annotation, if there is one*
 >   - another highlight #tag *([pg. 5](obsidian://lumen-pdf-mod?…))*
 >
 >   %% lumen-sidecar-end: … %%
