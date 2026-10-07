@@ -2,6 +2,10 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.18 — 2026-10-07
+
+- Fixed highlights that cross a page break covering both entire pages. The selection's boxes now come only from the selected text, not from the page layers the selection passes over. Existing highlights with whole-page boxes are cleaned up when they load.
+
 ## Mod 1.0.17 — 2026-10-07
 
 - After a manual sidecar export, the sidecar note opens in a new tab (or its existing tab is brought forward). Automatic updates don't open it.

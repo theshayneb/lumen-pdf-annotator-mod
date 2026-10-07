@@ -2029,14 +2029,15 @@ export class LumenPdfView extends FileView {
     if (!nativeSelection || nativeSelection.isCollapsed || !nativeSelection.rangeCount) return;
     const range = nativeSelection.getRangeAt(0).cloneRange();
     if (this.mobileRuntime && !this.selectionRangeBelongsToReader(range)) return;
-    const quote = range.toString().replace(/\s+/g, " ").trim();
+    const selected = this.selectedTextLayerRects(range);
+    const quote = selected.quote.replace(/\s+/g, " ").trim();
     if (!quote) return;
     // PDF.js can represent punctuation and narrow glyphs as sub-pixel or even
     // zero-width boundary rectangles. Discarding those anchors made the saved
     // quote include characters that the visible mark did not. Keep finite line
     // anchors here; coalescing below absorbs adjacent anchors and removes any
     // standalone zero-width caret/newline rectangles.
-    const rects = Array.from(range.getClientRects()).filter(rect => Number.isFinite(rect.left)
+    const rects = selected.rects.filter(rect => Number.isFinite(rect.left)
       && Number.isFinite(rect.top)
       && Number.isFinite(rect.width)
       && Number.isFinite(rect.height)
@@ -2072,6 +2073,36 @@ export class LumenPdfView extends FileView {
     this.selection = { quote, pages: byPage, x, y };
     if (this.extensionGroupId) this.showExtensionPalette();
     else this.showSelectionPalette();
+  }
+
+  /**
+   * Boxes and text for the selected part of each PDF text-layer text node.
+   * `range.getClientRects()` also returns the full border box of every element
+   * the range wholly contains; a selection crossing a page boundary contains
+   * page-sized layers (canvas, marks) between the two text layers, which
+   * turned into marks covering both pages.
+   */
+  private selectedTextLayerRects(range: Range): { rects: DOMRect[]; quote: string } {
+    const doc = range.startContainer.ownerDocument ?? document;
+    const common = range.commonAncestorContainer;
+    const root = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
+    const rects: DOMRect[] = [];
+    let quote = "";
+    if (!root) return { rects, quote };
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!range.intersectsNode(node) || !node.parentElement?.closest(".lumod-text-layer")) continue;
+      const text = node.textContent ?? "";
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : text.length;
+      if (end <= start) continue;
+      const part = doc.createRange();
+      part.setStart(node, start);
+      part.setEnd(node, end);
+      rects.push(...Array.from(part.getClientRects()));
+      quote += text.slice(start, end);
+    }
+    return { rects, quote };
   }
 
   private selectionRangeBelongsToReader(range: Range): boolean {

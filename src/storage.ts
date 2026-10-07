@@ -226,6 +226,13 @@ function normalizeAnnotation(value: unknown): PdfAnnotation | null {
     }];
   });
   if (!rects.length) return null;
+  // Text marks made across a page break before 1.0.18 could include whole-page
+  // boxes (the page's canvas and mark layers). Drop those when the mark also
+  // has real text boxes, so older highlights render correctly.
+  if (item.kind !== "page-note" && rects.length > 1) {
+    const textRects = rects.filter(rect => !(rect.width >= 0.95 && rect.height >= 0.9));
+    if (textRects.length) rects.splice(0, rects.length, ...textRects);
+  }
   const createdAt = finite(item.createdAt, Date.now());
   const style = isMarkStyle(item.style) ? item.style : "highlight";
   return {
