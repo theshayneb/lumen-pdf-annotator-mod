@@ -55,10 +55,19 @@ export function hasCustomColorName(color: string, names?: ColorNames): boolean {
   return !!customColorName(color, names);
 }
 
-/** Custom-named colours first (alphabetically), then palette order, then any other colours. */
+/** The color name that always sorts first, in the panel and in sidecar notes. */
+const PRIORITY_COLOR_NAME = "important";
+
+/**
+ * A color named "important" first, then other custom-named colors
+ * (alphabetically), then palette order, then any other colors.
+ */
 export function compareColors(a: string, b: string, names?: ColorNames): number {
   const customA = customColorName(a, names);
   const customB = customColorName(b, names);
+  const priorityA = customA.toLowerCase() === PRIORITY_COLOR_NAME;
+  const priorityB = customB.toLowerCase() === PRIORITY_COLOR_NAME;
+  if (priorityA !== priorityB) return priorityA ? -1 : 1;
   if (customA || customB) {
     if (!customA) return 1;
     if (!customB) return -1;

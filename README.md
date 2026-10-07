@@ -7,7 +7,7 @@
 > **Added in this fork:**
 >
 > - **View annotations by color.** The inspector's color row shows a chip for each highlight color with a count. Click a chip to show only that color, and click it again to show all colors. The sort menu also has a **Color** option that groups cards by color (palette order, then page). Each card shows its color name.
-> - **Name highlight colors per PDF.** Click **Color names** in the Annotations panel (or right-click a color chip, or run **Name highlight colors for this PDF**) to give each color a name for the open PDF, such as yellow → "friends". The names appear on the color chips and cards, sort first under **Color** sort, and are used as that PDF's sidecar headings. They're stored with that PDF's annotations, so another PDF can use different names for the same colors.
+> - **Name highlight colors per PDF.** Click **Color names** in the Annotations panel (or right-click a color chip, or run **Name highlight colors for this PDF**) to give each color a name for the open PDF, such as yellow → "friends". The names appear on the color chips and cards, sort first under **Color** sort, and are used as that PDF's sidecar headings (shown in the highlight color). A color named "important" always comes first. They're stored with that PDF's annotations, so another PDF can use different names for the same colors.
 > - **Sidecar Markdown export.** Choose the file-download icon in the inspector header, or run **Export annotations to sidecar Markdown note**, to write `<PDF name>.md` in the root of your vault. For example, `Papers/Smith 2024.pdf` → `Smith 2024.md`. If that name is already taken by another note or by a different PDF's sidecar, the sidecar is saved as `Smith 2024 2.md` (then `3`, and so on). In settings, choose whether the sidecar is grouped **by highlight color** or **by page**, and optionally keep it updated automatically after each change. The sidecar looks like this:
 >
 >   ```markdown
@@ -18,10 +18,11 @@
 >
 >   ---
 >
->   # friends
+>   # <span style="color: #ffd12d">friends</span>
 >
->   - the highlighted text *-- your annotation, if there is one* #tag *([p. 3](obsidian://lumen-pdf-mod?…))*
->   - another highlight #tag *([p. 5](obsidian://lumen-pdf-mod?…))*
+>   - the highlighted text *([pg. 3](obsidian://lumen-pdf-mod?…))*
+>   	- ["] your annotation, if there is one #tag
+>   - another highlight #tag *([pg. 5](obsidian://lumen-pdf-mod?…))*
 >
 >   %% lumen-sidecar-end: … %%
 >   ```

@@ -2,6 +2,12 @@
 
 All notable changes to Lumen PDF Annotator Mod are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## Mod 1.0.13 — 2026-10-07
+
+- Sidecar color headings are shown in their highlight color.
+- Notes are written as a nested `- ["] note` item under their highlight instead of inline; tags go on the note when there is one. Page references read `pg. 3`.
+- A color named "important" (any capitalization) is always listed first, in the sidecar and in the panel's **Color** sort.
+
 ## Mod 1.0.12 — 2026-10-06
 
 - Annotation cards show the highlighted text first, styled the same whether or not there is a note; the note follows below in regular weight.

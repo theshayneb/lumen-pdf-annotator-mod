@@ -127,12 +127,13 @@ function markdownColorName(color: string, names: ColorNames): string {
 }
 
 /**
- * One annotation as a single bullet:
+ * One annotation as a bullet, with its note (if any) as a nested quote item:
  *
- *     - highlighted text *-- note* #tag *([p. 3](obsidian://…))*
+ *     - highlighted text *([pg. 3](obsidian://…))*
+ *     	- ["] note #tag
  *
- * The note part is left out when there is no note; the page link opens the
- * annotation in the PDF.
+ * Tags go on the note when there is one, otherwise after the highlighted text.
+ * The page link opens the annotation in the PDF.
  */
 function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
   const { anchor, members, pages } = entry;
@@ -143,13 +144,29 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
     .filter(item => item.kind !== "page-note" && item.quote.trim())
     .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))
     .join(" … ");
-  const pageText = pages.length === 1 ? `p. ${pages[0]}` : `pp. ${pages.join(", ")}`;
+  const pageText = pages.length === 1 ? `pg. ${pages[0]}` : `pgs. ${pages.join(", ")}`;
   const link = `*([${pageText}](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)}))*`;
-  const parts = [quote || "Page note"];
-  if (note) parts.push(`*-- ${escapeInline(note.replace(/\s+/g, " ").trim())}*`);
-  if (tags) parts.push(tags);
-  parts.push(link);
-  lines.push(`- ${parts.join(" ")}`);
+  const highlight = [quote || "Page note"];
+  if (tags && !note) highlight.push(tags);
+  highlight.push(link);
+  lines.push(`- ${highlight.join(" ")}`);
+  if (note) {
+    const noteText = escapeInline(note.replace(/\s+/g, " ").trim());
+    lines.push(`\t- ["] ${tags ? `${noteText} ${tags}` : noteText}`);
+  }
+}
+
+/** A CSS color safe to put in a style attribute, or null. */
+function safeCssColor(color: string): string | null {
+  const value = color.trim();
+  return /^#[0-9a-f]{3,8}$/i.test(value) || /^[a-z]+$/i.test(value) || /^(rgb|hsl)a?\([\d.,%\s]+\)$/i.test(value) ? value : null;
+}
+
+/** A color-group heading, shown in the highlight's own color. */
+function colorHeading(color: string, names: ColorNames): string {
+  const label = markdownColorName(color, names);
+  const css = safeCssColor(color);
+  return css ? `# <span style="color: ${css}">${label}</span>` : `# ${label}`;
 }
 
 /** Markdown for a sidecar note, grouped by highlight color or by page. */
@@ -178,7 +195,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
       groups.set(entry.anchor.color, group);
     }
     for (const color of Array.from(groups.keys()).sort((a, b) => compareColors(a, b, names))) {
-      lines.push(`# ${markdownColorName(color, names)}`, "");
+      lines.push(colorHeading(color, names), "");
       for (const entry of groups.get(color) ?? []) renderEntry(lines, entry, vaultName, pdf.path);
       lines.push("");
     }
