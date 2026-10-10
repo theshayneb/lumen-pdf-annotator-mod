@@ -74,7 +74,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.pdfTheme,
       theme => void this.setPdfTheme(theme).catch(error => {
         console.error("Lumen could not save the PDF theme", error);
-        new Notice("PDF Annotator could not save the PDF theme. Your current document will keep using it until reload.");
+        new Notice("Could not save the PDF theme. Your current document will keep using it until reload.");
       }),
       this.settings.legacyAnnotationFolder,
       this.settings.automaticPdfBackups,
@@ -86,12 +86,12 @@ export default class LumenPdfPlugin extends Plugin {
     if (this.settings.defaultViewer) this.installAsDefaultPdfViewer();
     this.registerObsidianProtocolHandler(LUMEN_PROTOCOL_ACTION, params => void this.openAnnotationLink(params).catch(error => {
       console.error("Lumen could not open an annotation link", error);
-      new Notice("PDF Annotator could not open this annotation link.");
+      new Notice("Could not open this annotation link.");
     }));
 
     this.addCommand({
       id: "open-current-pdf-in-lumen",
-      name: "Open current PDF in PDF Annotator",
+      name: "Open current PDF in the annotator",
       checkCallback: checking => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || file.extension.toLowerCase() !== "pdf") return false;
@@ -166,7 +166,7 @@ export default class LumenPdfPlugin extends Plugin {
         if (!view) return false;
         if (!checking) void Promise.resolve(action(view)).catch(error => {
           console.error("Lumen command failed", error);
-          new Notice(`PDF Annotator could not complete the command: ${error instanceof Error ? error.message : String(error)}`);
+          new Notice(`Could not complete the command: ${error instanceof Error ? error.message : String(error)}`);
         });
         return true;
       },
@@ -181,11 +181,11 @@ export default class LumenPdfPlugin extends Plugin {
 
   private async openAnnotationLink(params: ObsidianProtocolData): Promise<void> {
     if (params.vault && params.vault !== this.app.vault.getName()) {
-      new Notice(`This PDF Annotator link belongs to the “${params.vault}” vault.`);
+      new Notice(`This highlight link belongs to the “${params.vault}” vault.`);
       return;
     }
     if (!params.file || !params.annotation) {
-      new Notice("This PDF Annotator highlight link is incomplete.");
+      new Notice("This highlight link is incomplete.");
       return;
     }
     const exactPath = normalizePath(params.file);

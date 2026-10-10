@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.22 — 2026-10-10
+
+- Tidied messages and the "Open current PDF in the annotator" command so they don't repeat the plugin name.
+
 ## 1.0.21 — 2026-10-10
 
 - Renamed the plugin to **PDF Annotator**. The plugin ID (`lumen-pdf-annotator-mod`), settings, and stored annotations are unchanged, so existing installs (including BRAT) update in place.
