@@ -1,4 +1,4 @@
-# Lumen PDF Annotator Mod
+# PDF Annotator
 
 > **This is a fork of [Lumen PDF Annotator](https://github.com/BenGutteridge1/lumen-pdf-annotator) by Ben Gutteridge.** It is a separate plugin with its own plugin ID (`lumen-pdf-annotator-mod`), settings, storage folder (`Dashboard/`), view type, and link scheme (`obsidian://lumen-pdf-mod`), so it does not share or modify the original plugin's data. Disable the original before enabling this one, since only one plugin can be the default PDF viewer.
 >
@@ -117,7 +117,7 @@ Once Lumen is accepted into the community directory:
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
 2. Create `<your-vault>/.obsidian/plugins/lumen-pdf-annotator-mod/`.
 3. Place all three files in that folder.
-4. Reload Obsidian, then enable **Lumen PDF Annotator Mod** under Community plugins.
+4. Reload Obsidian, then enable **PDF Annotator** under Community plugins.
 
 Lumen supports Obsidian 1.13.7 or newer on desktop, iOS, and Android.
 

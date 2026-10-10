@@ -73,5 +73,5 @@ jobs:
             gh release upload "${VERSION}" dist/main.js dist/manifest.json dist/styles.css --clobber
           else
             gh release create "${VERSION}" dist/main.js dist/manifest.json dist/styles.css \
-              --target "${GITHUB_SHA}" --title "Lumen PDF Annotator Mod ${VERSION}" --generate-notes
+              --target "${GITHUB_SHA}" --title "PDF Annotator ${VERSION}" --generate-notes
           fi

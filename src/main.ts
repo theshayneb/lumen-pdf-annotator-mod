@@ -74,7 +74,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.pdfTheme,
       theme => void this.setPdfTheme(theme).catch(error => {
         console.error("Lumen could not save the PDF theme", error);
-        new Notice("Lumen could not save the PDF theme. Your current document will keep using it until reload.");
+        new Notice("PDF Annotator could not save the PDF theme. Your current document will keep using it until reload.");
       }),
       this.settings.legacyAnnotationFolder,
       this.settings.automaticPdfBackups,
@@ -86,12 +86,12 @@ export default class LumenPdfPlugin extends Plugin {
     if (this.settings.defaultViewer) this.installAsDefaultPdfViewer();
     this.registerObsidianProtocolHandler(LUMEN_PROTOCOL_ACTION, params => void this.openAnnotationLink(params).catch(error => {
       console.error("Lumen could not open an annotation link", error);
-      new Notice("Lumen could not open this annotation link.");
+      new Notice("PDF Annotator could not open this annotation link.");
     }));
 
     this.addCommand({
       id: "open-current-pdf-in-lumen",
-      name: "Open current PDF in Lumen annotator",
+      name: "Open current PDF in PDF Annotator",
       checkCallback: checking => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || file.extension.toLowerCase() !== "pdf") return false;
@@ -110,7 +110,7 @@ export default class LumenPdfPlugin extends Plugin {
     this.addReaderCommand("place-page-note", "Place a page note", view => view.togglePageNotePlacement());
     this.addReaderCommand("checkpoint-annotations", "Save an annotation checkpoint", async view => {
       await view.checkpointAnnotations();
-      new Notice("Lumen annotation checkpoint saved.");
+      new Notice("Annotation checkpoint saved.");
     });
     this.addReaderCommand("export-annotations", "Export annotations for this PDF", async view => {
       const path = await view.exportAnnotations();
@@ -166,7 +166,7 @@ export default class LumenPdfPlugin extends Plugin {
         if (!view) return false;
         if (!checking) void Promise.resolve(action(view)).catch(error => {
           console.error("Lumen command failed", error);
-          new Notice(`Lumen could not complete the command: ${error instanceof Error ? error.message : String(error)}`);
+          new Notice(`PDF Annotator could not complete the command: ${error instanceof Error ? error.message : String(error)}`);
         });
         return true;
       },
@@ -181,11 +181,11 @@ export default class LumenPdfPlugin extends Plugin {
 
   private async openAnnotationLink(params: ObsidianProtocolData): Promise<void> {
     if (params.vault && params.vault !== this.app.vault.getName()) {
-      new Notice(`This Lumen link belongs to the “${params.vault}” vault.`);
+      new Notice(`This PDF Annotator link belongs to the “${params.vault}” vault.`);
       return;
     }
     if (!params.file || !params.annotation) {
-      new Notice("This Lumen highlight link is incomplete.");
+      new Notice("This PDF Annotator highlight link is incomplete.");
       return;
     }
     const exactPath = normalizePath(params.file);
@@ -193,7 +193,7 @@ export default class LumenPdfPlugin extends Plugin {
     const target = this.app.vault.getAbstractFileByPath(exactPath)
       ?? (legacyPath !== exactPath ? this.app.vault.getAbstractFileByPath(legacyPath) : null);
     if (!(target instanceof TFile) || target.extension.toLowerCase() !== "pdf") {
-      new Notice("The PDF for this Lumen highlight link could not be found.");
+      new Notice("The PDF for this highlight link could not be found.");
       return;
     }
     const leaf = this.app.workspace.getLeaf("tab");
@@ -238,7 +238,7 @@ export default class LumenPdfPlugin extends Plugin {
   private async verifyAllBackups(): Promise<void> {
     const bundles = await listBundles(this.app.vault);
     if (!bundles.length) {
-      new Notice("No Lumen PDF backups found.");
+      new Notice("No PDF backups found.");
       return;
     }
     let valid = 0;
@@ -260,7 +260,7 @@ export default class LumenPdfPlugin extends Plugin {
   private async chooseBackupToRestore(): Promise<void> {
     const bundles = await listBundles(this.app.vault);
     if (!bundles.length) {
-      new Notice("No Lumen PDF backups found.");
+      new Notice("No PDF backups found.");
       return;
     }
     new BackupRestoreModal(this, bundles).open();
@@ -297,18 +297,18 @@ class LumenSettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       {
-        name: "Make Lumen the default PDF viewer",
-        desc: "Open PDFs in Lumen after the next Obsidian restart.",
+        name: "Make PDF Annotator the default PDF viewer",
+        desc: "Open PDFs in PDF Annotator after the next Obsidian restart.",
         control: { type: "toggle", key: "defaultViewer", defaultValue: DEFAULT_SETTINGS.defaultViewer },
       },
       {
         name: "PDF theme",
-        desc: "Use this document theme for every Lumen reader.",
+        desc: "Use this document theme for every PDF Annotator reader.",
         control: { type: "dropdown", key: "pdfTheme", options: { light: "Light", sepia: "Sepia", dark: "Dark" }, defaultValue: DEFAULT_SETTINGS.pdfTheme },
       },
       {
         name: "Interface theme",
-        desc: "Theme for Lumen's toolbar, panels, and editors. The PDF pages keep the PDF theme.",
+        desc: "Theme for PDF Annotator's toolbar, panels, and editors. The PDF pages keep the PDF theme.",
         control: { type: "dropdown", key: "interfaceTheme", options: { dark: "Dark", light: "Light", pdf: "Match PDF theme" }, defaultValue: DEFAULT_SETTINGS.interfaceTheme },
       },
       {
@@ -323,7 +323,7 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Create automatic PDF recovery copies",
-        desc: "Copy each opened PDF into Lumen's recovery storage in the background. Keep this off for the smoothest large-PDF and cloud-vault performance.",
+        desc: "Copy each opened PDF into PDF Annotator's recovery storage in the background. Keep this off for the smoothest large-PDF and cloud-vault performance.",
         control: { type: "toggle", key: "automaticPdfBackups", defaultValue: DEFAULT_SETTINGS.automaticPdfBackups },
       },
       {
@@ -338,7 +338,7 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Export annotations",
-        desc: `Choose PDFs with Lumen annotations and export each one as a readable Markdown note in ${STORAGE_FOLDER}/exports/.`,
+        desc: `Choose annotated PDFs and export each one as a readable Markdown note in ${STORAGE_FOLDER}/exports/.`,
         render: setting => {
           setting.addButton(button => button.setButtonText("Choose PDFs to export").onClick(() => new AnnotationExportModal(this.plugin).open()));
         },
@@ -423,7 +423,7 @@ class AnnotationExportModal extends Modal {
     clear.addEventListener("click", () => { this.selected.clear(); this.renderList(); });
     this.listEl = this.contentEl.createDiv({ cls: "lumod-export-list" });
     this.listEl.setAttribute("role", "group");
-    this.listEl.setAttribute("aria-label", "PDFs with Lumen annotations");
+    this.listEl.setAttribute("aria-label", "Annotated PDFs");
     this.statusEl = this.contentEl.createDiv({ cls: "lumod-export-status" });
     const footer = this.contentEl.createDiv({ cls: "lumod-export-footer" });
     this.exportButton = footer.createEl("button", { text: "Export selected", cls: "mod-cta" });
@@ -454,7 +454,7 @@ class AnnotationExportModal extends Modal {
     this.countEl.setText(`${this.selected.size} selected · ${this.bundles.length} available`);
     this.exportButton.disabled = this.busy || this.selected.size === 0;
     if (message || this.bundles.length === 0) {
-      this.listEl.createEl("p", { text: message ?? "No PDFs with Lumen annotations were found in this vault.", cls: "lumod-export-empty" });
+      this.listEl.createEl("p", { text: message ?? "No annotated PDFs were found in this vault.", cls: "lumod-export-empty" });
       return;
     }
     if (!visible.length) {

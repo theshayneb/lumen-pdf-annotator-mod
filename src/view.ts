@@ -399,7 +399,7 @@ export class LumenPdfView extends FileView {
   }
 
   getViewType(): string { return LUMEN_VIEW_TYPE; }
-  getDisplayText(): string { return this.file?.basename ?? "Lumen PDF"; }
+  getDisplayText(): string { return this.file?.basename ?? "PDF"; }
   getIcon(): string { return "file-text"; }
   canAcceptExtension(extension: string): boolean { return extension.toLowerCase() === "pdf"; }
 
@@ -2749,7 +2749,7 @@ export class LumenPdfView extends FileView {
       new Notice(annotation.kind === "page-note" ? "Annotation link copied." : "Highlight link copied.");
     } catch (error) {
       console.error("Lumen could not copy an annotation link", error);
-      new Notice("Lumen could not copy the annotation link.");
+      new Notice("PDF Annotator could not copy the annotation link.");
     }
   }
 
@@ -3704,7 +3704,7 @@ export class LumenPdfView extends FileView {
         await this.bundle.repository.flushJournal();
       } catch (error) {
         console.error("Lumen could not flush annotations while closing the PDF", error);
-        new Notice("Lumen could not flush recent annotation changes.", 8000);
+        new Notice("PDF Annotator could not flush recent annotation changes.", 8000);
       }
     }
     try { await this.pdfDocument?.destroy?.(); } catch { /* already gone */ }
