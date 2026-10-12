@@ -2,13 +2,18 @@ import { normalizePath, TFile, Vault } from "obsidian";
 import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MarkStyle, normalizeColorNames, normalizeColorOrder, normalizeExtraColors, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
-export const STORAGE_FOLDER = "Dashboard";
+export const STORAGE_FOLDER = "Utilities/PDF Annotator";
+// Used by 1.0.5–1.0.22. Its contents are moved into STORAGE_FOLDER on load.
+const PREVIOUS_STORAGE_FOLDER = "Dashboard";
 const ROOT = `${STORAGE_FOLDER}/bundles/sha256`;
 const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
-// Earlier storage locations, newest first: this fork's 1.0.0–1.0.4 folder and
-// the original Lumen plugin's folder. They are never written to; a PDF's
-// annotations are copied across the first time it is opened here.
-const PREVIOUS_ROOTS = [".lumen-pdf-mod/bundles/sha256", ".lumen-pdf/bundles/sha256"];
+// Earlier storage locations, newest first: the previous folder (for anything
+// the move could not handle), this fork's 1.0.0–1.0.4 folder, and the original
+// Lumen plugin's folder. They are never written to; a PDF's annotations are
+// copied across the first time it is opened here.
+const PREVIOUS_ROOTS = [`${PREVIOUS_STORAGE_FOLDER}/bundles/sha256`, ".lumen-pdf-mod/bundles/sha256", ".lumen-pdf/bundles/sha256"];
+// Previous roots that may still hold bundles nobody has reopened yet.
+const UNMIGRATED_ROOTS = PREVIOUS_ROOTS.slice(0, 2);
 const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
 // Per-PDF colour names. They live in the PDF's bundle, so they follow the PDF
 // (by content) and never apply to other PDFs.
@@ -549,7 +554,7 @@ export async function listBundles(vault: Vault): Promise<BundleInfo[]> {
   const bundles: BundleInfo[] = [];
   const seen = new Set<string>();
   // Backups made before the storage folder moved stay restorable where they are.
-  for (const root of [ROOT, PREVIOUS_ROOTS[0]]) {
+  for (const root of [ROOT, ...UNMIGRATED_ROOTS]) {
     if (!(await vault.adapter.exists(root))) continue;
     for (const folder of (await vault.adapter.list(root)).folders) {
       const hash = folder.split("/").pop() ?? "";
@@ -574,7 +579,7 @@ export async function listAnnotationBundles(vault: Vault): Promise<AnnotationBun
   const bundles: AnnotationBundleInfo[] = [];
   const seen = new Set<string>();
   // Not-yet-reopened PDFs from the previous folder stay exportable.
-  for (const root of [ROOT, PREVIOUS_ROOTS[0], LEGACY_ROOT]) {
+  for (const root of [ROOT, ...UNMIGRATED_ROOTS, LEGACY_ROOT]) {
     if (!(await vault.adapter.exists(root))) continue;
     const folders = (await vault.adapter.list(root)).folders;
     for (let offset = 0; offset < folders.length; offset += 1) {
@@ -680,4 +685,57 @@ export async function loadLegacyAnnotations(vault: Vault, hash: string, pdfPath:
     } catch { /* an invalid legacy source must not prevent the PDF from opening */ }
   }
   return result;
+}
+
+/** Move `from` to `to` unless `to` already exists; returns whether it moved. */
+async function moveIfFree(vault: Vault, from: string, to: string): Promise<boolean> {
+  if (!(await vault.adapter.exists(from)) || await vault.adapter.exists(to)) return false;
+  await ensureFolder(vault, to.split("/").slice(0, -1).join("/"));
+  await vault.adapter.rename(from, to);
+  return true;
+}
+
+/** Remove `path` and its now-empty subfolders; anything that still holds files stays. */
+async function removeIfEmpty(vault: Vault, path: string): Promise<void> {
+  if (!(await vault.adapter.exists(path))) return;
+  const listing = await vault.adapter.list(path);
+  for (const folder of listing.folders) await removeIfEmpty(vault, folder);
+  const after = await vault.adapter.list(path);
+  if (!after.files.length && !after.folders.length) await vault.adapter.rmdir(path, false);
+}
+
+/**
+ * One-time move of everything in the previous storage folder ("Dashboard/")
+ * into STORAGE_FOLDER. Items already present at the destination are left in
+ * place (and remain readable as a previous root); the old folder is removed
+ * only if nothing is left in it.
+ */
+export async function migrateStorageFolder(vault: Vault): Promise<void> {
+  const old = PREVIOUS_STORAGE_FOLDER;
+  if (!(await vault.adapter.exists(old))) return;
+  for (const name of ["bundles", "file-index", "exports", "recovered"]) {
+    const from = `${old}/${name}`;
+    if (!(await vault.adapter.exists(from))) continue;
+    try {
+      if (await moveIfFree(vault, from, `${STORAGE_FOLDER}/${name}`)) continue;
+      // The destination exists already: move entries one at a time.
+      const children = name === "bundles" ? `${from}/sha256` : from;
+      const target = name === "bundles" ? `${STORAGE_FOLDER}/bundles/sha256` : `${STORAGE_FOLDER}/${name}`;
+      if (!(await vault.adapter.exists(children))) continue;
+      const listing = await vault.adapter.list(children);
+      for (const entry of [...listing.folders, ...listing.files]) {
+        await moveIfFree(vault, entry, `${target}/${entry.split("/").at(-1)}`);
+      }
+    } catch (error) {
+      console.error(`PDF Annotator could not move ${from} to ${STORAGE_FOLDER}`, error);
+    }
+  }
+  try {
+    for (const name of ["bundles", "file-index", "exports", "recovered"]) await removeIfEmpty(vault, `${old}/${name}`);
+    // Only the old folder itself, never other (user) folders inside it.
+    const rest = await vault.adapter.list(old);
+    if (!rest.files.length && !rest.folders.length) await vault.adapter.rmdir(old, false);
+  } catch (error) {
+    console.error(`PDF Annotator could not tidy up ${old}`, error);
+  }
 }

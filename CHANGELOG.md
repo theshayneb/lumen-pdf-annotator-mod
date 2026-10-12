@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.23 — 2026-10-12
+
+- Plugin data moved from `Dashboard/` to `Utilities/PDF Annotator/` (bundles, file index, exports, recovered PDFs). The move happens once, automatically, when the plugin loads. Anything that already exists at the destination is left alone, and the old `Dashboard/` folder is removed only if nothing else is in it.
+
 ## 1.0.22 — 2026-10-10
 
 - Tidied messages and the "Open current PDF in the annotator" command so they don't repeat the plugin name.
