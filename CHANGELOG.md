@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.24 — 2026-10-15
+
+- Added **Define or translate** to the selection palette, the same lookup as Omni Book Reader Mod: English words get dictionary definitions, other languages are translated into English. The result can be copied or saved as a highlight whose note is the definition (tagged `#definition` or `#translation`). Lookups go online only when you tap the button.
+
 ## 1.0.23 — 2026-10-12
 
 - Plugin data moved from `Dashboard/` to `Utilities/PDF Annotator/` (bundles, file index, exports, recovered PDFs). The move happens once, automatically, when the plugin loads. Anything that already exists at the destination is left alone, and the old `Dashboard/` folder is removed only if nothing else is in it.

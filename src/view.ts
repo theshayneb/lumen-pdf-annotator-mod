@@ -17,6 +17,7 @@ import {
 } from "./outline";
 import { SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
 import { DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle } from "./storage";
+import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
 export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
 export type PdfTheme = "light" | "sepia" | "dark";
@@ -305,6 +306,7 @@ export class LumenPdfView extends FileView {
   private selection: PendingSelection | null = null;
   private selectionPalette: HTMLElement | null = null;
   private suppressNextSelectionCapture = false;
+  private lookupInFlight = 0;
   private extensionGroupId: string | null = null;
   private editor: HTMLElement | null = null;
   private searchGeneration = 0;
@@ -2286,6 +2288,9 @@ export class LumenPdfView extends FileView {
       void this.writeClipboard(pendingSelection.quote);
       this.closeSelectionPalette();
     }));
+    actions.append(iconButton("book-a", "Define or translate", () => {
+      void this.lookUpSelection(pendingSelection, pendingColor);
+    }));
     if (this.mobileRuntime) return;
     const width = palette.offsetWidth || 390;
     palette.style.left = `${clamp(pendingSelection.x - width / 2, 12, window.innerWidth - width - 12)}px`;
@@ -2400,8 +2405,8 @@ export class LumenPdfView extends FileView {
     this.rootEl?.classList.remove("is-extending-annotation");
   }
 
-  private commitSelection(style: MarkStyle, color: string, openEditor: boolean): void {
-    if (!this.selection || !this.bundle) return;
+  private commitSelection(style: MarkStyle, color: string, openEditor: boolean, extra?: Pick<PdfAnnotation, "note" | "tags">): PdfAnnotation | null {
+    if (!this.selection || !this.bundle) return null;
     let first: PdfAnnotation | null = null;
     // A selection across a page break is one logical annotation: the parts on
     // later pages join the first part's group, as extended annotations do.
@@ -2409,6 +2414,7 @@ export class LumenPdfView extends FileView {
     for (const [page, rects] of pages) {
       const annotation = newAnnotation(page, rects, this.selection.quote, color, style);
       if (first) annotation.groupId = first.id;
+      if (extra) Object.assign(annotation, { note: extra.note, tags: extra.tags.slice() });
       this.index.put(annotation);
       this.bundle.repository.queue({ op: "put", annotation });
       this.renderMarks(page);
@@ -2422,6 +2428,66 @@ export class LumenPdfView extends FileView {
       const mark = this.pages.get(first.page)?.markHost?.querySelector<HTMLElement>(`[data-annotation-id="${first.id}"]`);
       if (mark) this.openEditor(first, mark);
     }
+    return first;
+  }
+
+  /**
+   * Defines the selected English word, or translates other languages, and
+   * shows the result in place of the selection toolbar. The selection is kept
+   * so the result can be saved as a highlight with the result as its note.
+   */
+  private async lookUpSelection(pending: PendingSelection, color: string): Promise<void> {
+    const id = ++this.lookupInFlight;
+    const panel = this.showLookupPanel(pending);
+    const body = panel.createDiv({ cls: "lumod-lookup-body" });
+    body.createDiv({ cls: "lumod-lookup-status", text: "Looking up…" });
+    let result: LookupResult;
+    try {
+      result = await lookUpSelection(pending.quote);
+    } catch (error) {
+      if (id !== this.lookupInFlight || this.selectionPalette !== panel) return;
+      console.error("Word lookup failed", error);
+      const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
+      body.empty();
+      body.createDiv({ cls: "lumod-lookup-status", text: `Could not look up the selection${reason}.` });
+      return;
+    }
+    if (id !== this.lookupInFlight || this.selectionPalette !== panel) return;
+    panel.querySelector(".lumod-lookup-title")?.setText(result.text || pending.quote);
+    body.empty();
+    renderLookupResult(body, result);
+    if (result.kind === "not-found") return;
+    const actions = panel.createDiv({ cls: "lumod-lookup-actions" });
+    const copy = actions.createEl("button", { text: "Copy", attr: { type: "button" } });
+    const save = actions.createEl("button", { cls: "mod-cta", text: "Save as highlight", attr: { type: "button" } });
+    copy.addEventListener("click", event => {
+      event.stopPropagation();
+      void this.writeClipboard(`${result.text}: ${lookupSummary(result)}`).then(() => copy.setText("Copied"));
+    });
+    save.addEventListener("click", event => {
+      event.stopPropagation();
+      this.selection = pending;
+      const saved = this.commitSelection("highlight", color, false, { note: lookupSummary(result), tags: [lookupTag(result)] });
+      if (!saved) new Notice("Could not highlight the selection.");
+    });
+  }
+
+  /** Replaces the selection toolbar with an empty lookup result panel. */
+  private showLookupPanel(pending: PendingSelection): HTMLElement {
+    this.selectionPalette?.remove();
+    const panel = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-lookup-panel", attr: { role: "dialog", "aria-label": "Word lookup result" } });
+    this.prepareDetachedSurface(panel);
+    this.selectionPalette = panel;
+    this.selection = pending;
+    const header = panel.createDiv({ cls: "lumod-lookup-header" });
+    header.createDiv({ cls: "lumod-lookup-title", text: pending.quote.replace(/\s+/g, " ").trim().slice(0, 120) });
+    header.append(iconButton("x", "Close", () => this.closeSelectionPalette()));
+    if (!this.mobileRuntime) {
+      const width = Math.min(420, window.innerWidth - 24);
+      panel.style.left = `${clamp(pending.x - width / 2, 12, window.innerWidth - width - 12)}px`;
+      panel.style.top = `${clamp(pending.y + 12, 12, Math.max(12, window.innerHeight - 340))}px`;
+    }
+    return panel;
   }
 
   /**
@@ -3732,6 +3798,26 @@ interface PaletteEntry {
 }
 
 /** Name highlight colors for one PDF, and add, change or remove extra colors. */
+/** Fills `container` with a lookup result: a definition for English, otherwise a translation. */
+function renderLookupResult(container: HTMLElement, result: LookupResult): void {
+  if (result.kind === "definition") {
+    if (result.phonetic) container.createDiv({ cls: "lumod-lookup-phonetic", text: result.phonetic });
+    for (const meaning of result.meanings) {
+      if (meaning.partOfSpeech) container.createEl("h4", { cls: "lumod-lookup-pos", text: meaning.partOfSpeech });
+      const list = container.createEl("ol", { cls: "lumod-lookup-senses" });
+      for (const sense of meaning.senses) {
+        const item = list.createEl("li", { text: sense.definition });
+        if (sense.example) item.createDiv({ cls: "lumod-lookup-example", text: `“${sense.example}”` });
+      }
+    }
+  } else if (result.kind === "translation") {
+    container.createDiv({ cls: "lumod-lookup-translation", text: result.translation });
+    container.createDiv({ cls: "lumod-lookup-source", text: `Translated from ${languageName(result.sourceLanguage)}` });
+  } else {
+    container.createDiv({ cls: "lumod-lookup-status", text: "No definition found." });
+  }
+}
+
 class ColorNamesModal extends Modal {
   private readonly draft: ColorNames;
   private entries: PaletteEntry[];
