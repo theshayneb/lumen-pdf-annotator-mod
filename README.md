@@ -15,9 +15,6 @@
 >   ---
 >   Related: "[[Papers/Smith 2024.pdf|Smith 2024.pdf]]"
 >   ---
->   [[Papers/Smith 2024.pdf|Smith 2024.pdf]]
->
->   ---
 >
 >   # <span style="color: #ffd12d">friends</span>
 >

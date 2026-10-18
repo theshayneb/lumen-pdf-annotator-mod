@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.26 — 2026-10-18
+
+- The sidecar no longer repeats the PDF link (and the rule under it) at the top of the note, since the `Related` property already links the PDF. The note starts with the first heading.
+
 ## 1.0.25 — 2026-10-18
 
 - The sidecar note's frontmatter property is now `Related`, holding a link to the PDF (`Related: "[[Papers/Smith 2024.pdf|Smith 2024.pdf]]"`) instead of `lumen-pdf: "<path>"`. Existing sidecars are still recognized and switch over on their next export. A note is only treated as a sidecar when it also has the `%% lumen-sidecar-end %%` line, so other notes with a `Related` property are never overwritten.

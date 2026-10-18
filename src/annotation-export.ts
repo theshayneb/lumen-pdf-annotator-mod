@@ -182,9 +182,6 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
     "---",
     `${SIDECAR_PDF_KEY}: ${yamlString(`[[${pdf.path}|${pdf.name}]]`)}`,
     "---",
-    `[[${pdf.path}|${pdf.name}]]`,
-    "",
-    "---",
     "",
   ];
   if (!entries.length) lines.push("*No annotations yet.*", "");
