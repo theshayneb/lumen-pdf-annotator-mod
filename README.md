@@ -13,7 +13,7 @@
 >
 >   ```markdown
 >   ---
->   lumen-pdf: "Papers/Smith 2024.pdf"
+>   Related: "[[Papers/Smith 2024.pdf|Smith 2024.pdf]]"
 >   ---
 >   [[Papers/Smith 2024.pdf|Smith 2024.pdf]]
 >
@@ -28,7 +28,7 @@
 >   %% lumen-sidecar-end: … %%
 >   ```
 >
->   `lumen-pdf` is the only frontmatter property it needs. It records which PDF the note belongs to, and the plugin only overwrites notes that have it, so your own notes are never replaced. Text you write below the `%% lumen-sidecar-end … %%` line (hidden in reading view) is kept when the sidecar is re-exported.
+>   `Related` is the only frontmatter property it adds: a link to the PDF the note belongs to. The plugin only overwrites a note that has this link to the same PDF *and* the `%% lumen-sidecar-end … %%` line, so your own notes are never replaced. Sidecars exported by earlier versions (with `lumen-pdf:`) are recognized and switch to `Related` the next time they're exported. Text you write below the `%% lumen-sidecar-end … %%` line (hidden in reading view) is kept when the sidecar is re-exported.
 > - **Dark interface by default.** The toolbar, panels, and editors use a dark theme while PDF pages stay light. Change it under **Settings → Interface theme** (Dark, Light, or Match PDF theme).
 
 Read, search, highlight, and annotate PDFs inside Obsidian with a calm interface designed to stay out of the document's way.

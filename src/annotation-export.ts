@@ -95,11 +95,15 @@ export async function writeAnnotationExport(vault: Vault, path: string, index: A
 }
 
 /**
- * The sidecar's only frontmatter property: the PDF it belongs to. Its presence
- * is also what allows the plugin to overwrite the note.
+ * The sidecar's only frontmatter property: a link to the PDF it belongs to.
+ * Together with the end marker it is what allows the plugin to overwrite the
+ * note; "Related" is a common property name, so it is never trusted alone.
  */
-const SIDECAR_PDF_KEY = "lumen-pdf";
+const SIDECAR_PDF_KEY = "Related";
 const SIDECAR_END = "%% lumen-sidecar-end: anything you write below this line is kept when the sidecar is re-exported %%";
+const SIDECAR_END_PREFIX = "%% lumen-sidecar-end";
+// Written by 1.0.8–1.0.24: the PDF path as a plain string.
+const PREVIOUS_PDF_KEY = "lumen-pdf";
 // Frontmatter written by 1.0.0–1.0.7, still recognised so old sidecars are reused.
 const LEGACY_MARKER = "lumen-sidecar";
 const LEGACY_PDF_KEY = "lumen-pdf-path";
@@ -176,7 +180,7 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
   const entries = await exportEntries(index);
   const lines = [
     "---",
-    `${SIDECAR_PDF_KEY}: ${yamlString(pdf.path)}`,
+    `${SIDECAR_PDF_KEY}: ${yamlString(`[[${pdf.path}|${pdf.name}]]`)}`,
     "---",
     `[[${pdf.path}|${pdf.name}]]`,
     "",
@@ -234,11 +238,26 @@ function frontmatterValue(frontmatter: string, key: string): string | null {
   try { return String(JSON.parse(raw)); } catch { return raw.replace(/^['"]|['"]$/g, ""); }
 }
 
+/**
+ * The link target of a `Related` property, whether written inline or, after
+ * editing it in Obsidian's property editor, as the first item of a list.
+ */
+function relatedLinkTarget(frontmatter: string): string | null {
+  const match = frontmatter.match(new RegExp(`^${SIDECAR_PDF_KEY}:[ \\t]*(.*?)\\s*$(?:\\r?\\n[ \\t]*-[ \\t]*(.*?)\\s*$)?`, "mi"));
+  if (!match) return null;
+  const raw = match[1] || match[2] || "";
+  let value = raw;
+  try { value = String(JSON.parse(raw)); } catch { value = raw.replace(/^['"]|['"]$/g, ""); }
+  return value.match(/^\[\[([^|\]]+)/)?.[1]?.trim() ?? null;
+}
+
 /** The PDF path a sidecar was written for, "" if unknown, or null if the note is not a sidecar. */
 function sidecarOwner(content: string): string | null {
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
   if (frontmatter === undefined) return null;
-  const pdf = frontmatterValue(frontmatter, SIDECAR_PDF_KEY);
+  const related = content.includes(SIDECAR_END_PREFIX) ? relatedLinkTarget(frontmatter) : null;
+  if (related !== null) return related;
+  const pdf = frontmatterValue(frontmatter, PREVIOUS_PDF_KEY);
   if (pdf !== null) return pdf;
   if (frontmatterValue(frontmatter, LEGACY_MARKER) !== "true") return null;
   const legacyPath = frontmatterValue(frontmatter, LEGACY_PDF_KEY);
