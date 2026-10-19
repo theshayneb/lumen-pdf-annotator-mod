@@ -4,6 +4,12 @@ import { annotationUri } from "./links";
 import { colorName, hasCustomColorName, orderColors } from "./model";
 import type { ColorNames } from "./model";
 import type { AnnotationIndex, PdfAnnotation } from "./model";
+import { areaImagePath } from "./storage";
+
+/** An embed of an area annotation's saved picture. */
+function areaEmbed(annotation: PdfAnnotation): string {
+  return `![[${areaImagePath(annotation.id)}]]`;
+}
 
 export type SidecarGrouping = "page" | "color";
 
@@ -27,6 +33,7 @@ function pageLabel(pages: number[]): string {
 
 function styleLabel(annotation: PdfAnnotation): string {
   if (annotation.kind === "page-note") return "Page note";
+  if (annotation.kind === "area") return "Area";
   return annotation.style === "comment" ? "Comment" : annotation.style.charAt(0).toUpperCase() + annotation.style.slice(1);
 }
 
@@ -67,7 +74,8 @@ export async function writeAnnotationExport(vault: Vault, path: string, index: A
         batch.push(`## Page ${currentPage}`, "");
       }
       batch.push(`### ${entryNumber + 1}. ${styleLabel(anchor)} · ${pageLabel(pages)}`, "");
-      const quoted = members.filter(item => item.kind !== "page-note" && item.quote.trim());
+      if (anchor.kind === "area") batch.push(areaEmbed(anchor), "");
+      const quoted = members.filter(item => item.kind === "text" && item.quote.trim());
       const sameQuote = new Set(quoted.map(member => member.quote.trim())).size === 1;
       for (const member of sameQuote ? quoted.slice(0, 1) : quoted) {
         if (pages.length > 1 && !sameQuote) batch.push(`*Page ${member.page}*`, "");
@@ -146,8 +154,9 @@ function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdf
     ?? members.find(item => item.note.trim())?.note;
   const tags = (members.find(item => item.tags.length)?.tags ?? []).map(tagLabel).join(" ");
   // Parts of one annotation on several pages usually share the full quote.
-  const quote = Array.from(new Set(members
-    .filter(item => item.kind !== "page-note" && item.quote.trim())
+  // An area shows its picture instead of the text found inside it.
+  const quote = anchor.kind === "area" ? areaEmbed(anchor) : Array.from(new Set(members
+    .filter(item => item.kind === "text" && item.quote.trim())
     .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))))
     .join(" … ");
   const pageText = pages.length === 1 ? `pg. ${pages[0]}` : `pgs. ${pages.join(", ")}`;

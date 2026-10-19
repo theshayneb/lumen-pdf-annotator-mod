@@ -10,7 +10,8 @@ export interface NormalizedRect {
 export interface PdfAnnotation {
   id: string;
   groupId?: string;
-  kind?: "text" | "page-note";
+  /** "area" marks a box drawn around a region (an image or table) that is saved as a picture. */
+  kind?: "text" | "page-note" | "area";
   page: number;
   rects: NormalizedRect[];
   quote: string;

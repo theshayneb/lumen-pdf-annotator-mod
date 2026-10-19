@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.27 — 2026-10-19
+
+- **Area annotations.** The new **Capture an area** toolbar button (and command) lets you drag a box around an image, chart or table. It gets a color, note and tags like a highlight. A picture of the area is saved to `Utilities/PDF Annotator/images/` and embedded in the sidecar note in place of the highlighted text; the Annotations panel and editor show the picture too. Text inside the area is kept for search. Deleting an area moves its picture to the trash.
+
 ## 1.0.26 — 2026-10-18
 
 - The sidecar no longer repeats the PDF link (and the rule under it) at the top of the note, since the `Related` property already links the PDF. The note starts with the first heading.

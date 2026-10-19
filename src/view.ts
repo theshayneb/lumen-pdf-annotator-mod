@@ -16,7 +16,7 @@ import {
   resolvePdfOutline,
 } from "./outline";
 import { SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
-import { DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle } from "./storage";
+import { areaImagePath, DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
 export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
@@ -322,6 +322,9 @@ export class LumenPdfView extends FileView {
   private isScrolling = false;
   private pageNotePlacement = false;
   private pageNoteButton: HTMLButtonElement | null = null;
+  private areaMode = false;
+  private areaButton: HTMLButtonElement | null = null;
+  private areaDraft: { state: PageState; pointerId: number; startX: number; startY: number; box: HTMLElement } | null = null;
   private readonly pageTextCache = new Map<number, SearchPageData>();
   private pageTextCacheChars = 0;
   private pageTextCacheSpans = 0;
@@ -395,6 +398,7 @@ export class LumenPdfView extends FileView {
       else if (this.outlinePanel?.classList.contains("is-open")) this.toggleOutline();
       else if (this.inspector?.classList.contains("is-open")) this.toggleInspector();
       else if (this.pageNotePlacement) this.togglePageNotePlacement();
+      else if (this.areaMode) this.toggleAreaMode(false);
       else return true;
       return false;
     });
@@ -613,7 +617,18 @@ export class LumenPdfView extends FileView {
     return true;
   }
 
+  /** Toggles drawing a box around an image or table to save it as an area annotation. */
+  toggleAreaMode(force = !this.areaMode): void {
+    if (force && this.pageNotePlacement) this.togglePageNotePlacement();
+    this.areaMode = force;
+    if (!force) this.cancelAreaDraft();
+    this.areaButton?.classList.toggle("is-active", force);
+    this.areaButton?.setAttribute("aria-pressed", String(force));
+    this.rootEl?.classList.toggle("is-capturing-area", force);
+  }
+
   togglePageNotePlacement(): void {
+    if (!this.pageNotePlacement && this.areaMode) this.toggleAreaMode(false);
     this.pageNotePlacement = !this.pageNotePlacement;
     this.pageNoteButton?.classList.toggle("is-active", this.pageNotePlacement);
     this.pageNoteButton?.setAttribute("aria-pressed", String(this.pageNotePlacement));
@@ -725,6 +740,11 @@ export class LumenPdfView extends FileView {
     this.buildOutlinePanel();
     this.buildInspector();
     this.pagesEl.addEventListener("click", event => {
+      if (this.areaMode) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (this.suppressNextAnnotationClick) {
         this.suppressNextAnnotationClick = false;
         event.preventDefault();
@@ -773,6 +793,10 @@ export class LumenPdfView extends FileView {
       } else this.openDenseAnnotationMenuAtPoint(event, state);
     });
     this.pagesEl.addEventListener("pointerdown", event => {
+      if (this.areaMode) {
+        this.beginAreaDraft(event);
+        return;
+      }
       if (event.target instanceof Element && event.target.closest(".lumod-mark")) event.stopPropagation();
       if (this.mobileRuntime) this.beginMobileLongPress(event);
     });
@@ -863,6 +887,9 @@ export class LumenPdfView extends FileView {
     this.pageNoteButton = iconButton("sticky-note", "Place a page note", () => this.togglePageNotePlacement());
     this.pageNoteButton.setAttribute("aria-pressed", "false");
     actions.append(this.pageNoteButton);
+    this.areaButton = iconButton("crop", "Capture an area (image or table)", () => this.toggleAreaMode());
+    this.areaButton.setAttribute("aria-pressed", "false");
+    actions.append(this.areaButton);
     this.themeButton = iconButton(this.theme === "light" ? "sun" : this.theme === "sepia" ? "coffee" : "moon", `PDF theme: ${this.theme}`, () => this.showThemeMenu());
     this.themeButton.addClass("lumod-theme-button");
     this.themeButton.dataset.theme = this.theme;
@@ -2499,7 +2526,7 @@ export class LumenPdfView extends FileView {
     if (!this.bundle) return;
     const candidates = new Map<string, PdfAnnotation[]>();
     for (const item of this.index.all()) {
-      if (item.groupId || item.kind === "page-note" || !item.quote.trim()) continue;
+      if (item.groupId || item.kind !== "text" || !item.quote.trim()) continue;
       const key = `${item.createdAt}\u0000${item.quote}\u0000${item.color}\u0000${item.style}`;
       const list = candidates.get(key) ?? [];
       list.push(item);
@@ -2548,13 +2575,18 @@ export class LumenPdfView extends FileView {
           mark.addClass("is-page-note");
           mark.setAttribute("aria-label", `Page ${annotation.page} note`);
           setIcon(mark, "sticky-note");
+        } else if (annotation.kind === "area") {
+          // Only the corner tab takes clicks, so text inside the box can still be selected.
+          mark.addClass("is-area");
+          const handle = mark.createDiv({ cls: "lumod-area-handle", attr: { "aria-label": `Area on page ${annotation.page}` } });
+          setIcon(handle, "image");
         }
         mark.dataset.annotationId = annotation.id;
         if (this.mobileRuntime) {
           if (rectIndex === 0) {
             mark.tabIndex = 0;
             mark.setAttribute("role", "button");
-            mark.setAttribute("aria-label", `${annotation.kind === "page-note" ? "Page note" : markLabel(annotation.style)} on page ${annotation.page}`);
+            mark.setAttribute("aria-label", `${annotation.kind === "page-note" ? "Page note" : annotation.kind === "area" ? "Area" : markLabel(annotation.style)} on page ${annotation.page}`);
           } else mark.setAttribute("aria-hidden", "true");
         }
         mark.style.setProperty("--mark-color", annotation.color);
@@ -2871,7 +2903,7 @@ export class LumenPdfView extends FileView {
         colors.querySelectorAll(".lumod-color-chip").forEach(item => item.classList.toggle("is-active", item === chip));
       });
     }
-    if (annotation.kind !== "page-note") {
+    if (annotation.kind === "text") {
       const styles = container.createDiv({ cls: "lumod-style-row" });
       for (const [style, icon] of [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const) {
         const button = iconButton(icon, markLabel(style), () => {
@@ -2882,7 +2914,11 @@ export class LumenPdfView extends FileView {
         styles.append(button);
       }
     }
-    if (annotation.kind !== "page-note") {
+    if (annotation.kind === "area") {
+      const preview = container.createDiv({ cls: "lumod-editor-area" });
+      preview.createEl("img", { attr: { src: this.areaImageSrc(annotation), alt: `Area on page ${annotation.page}` } });
+      if (compact) preview.classList.add("is-compact");
+    } else if (annotation.kind !== "page-note") {
       const quote = container.createDiv({ cls: "lumod-editor-quote", text: annotation.quote });
       if (compact) quote.classList.add("is-compact");
     }
@@ -2899,8 +2935,10 @@ export class LumenPdfView extends FileView {
     tags.addEventListener("input", saveTags);
     tags.addEventListener("change", saveTags);
     const actions = container.createDiv({ cls: "lumod-editor-actions" });
-    actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
-    if (annotation.kind !== "page-note") {
+    if (annotation.kind === "area") {
+      actions.append(iconButton("copy", "Copy image embed", () => void this.writeClipboard(`![[${areaImagePath(annotation.id)}]]`)));
+    } else actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
+    if (annotation.kind === "text") {
       actions.append(iconButton("scan-text", "Extend annotation", () => this.beginExtension(annotation)));
     }
     if (compact) actions.append(iconButton("panel-right-open", "Open in inspector", () => {
@@ -2914,7 +2952,7 @@ export class LumenPdfView extends FileView {
   }
 
   private beginExtension(annotation: PdfAnnotation): void {
-    if (annotation.kind === "page-note") return;
+    if (annotation.kind !== "text") return;
     this.extensionGroupId = this.index.groupId(annotation);
     this.rootEl.addClass("is-extending-annotation");
     this.closeEditor();
@@ -2945,6 +2983,10 @@ export class LumenPdfView extends FileView {
       this.index.remove(current.id);
       this.bundle.repository.queue({ op: "remove", id: current.id, at: now });
       pages.add(current.page);
+      if (current.kind === "area") {
+        const image = this.app.vault.getAbstractFileByPath(areaImagePath(current.id));
+        if (image) void this.app.fileManager.trashFile(image);
+      }
     }
     for (const page of pages) this.renderMarks(page);
     this.closeEditor();
@@ -3057,7 +3099,7 @@ export class LumenPdfView extends FileView {
       card.style.setProperty("--mark-color", item.color);
       const meta = card.createDiv({ cls: "lumod-card-meta" });
       meta.createEl("strong", { text: this.annotationPageLabel(item, "p.") });
-      meta.createSpan({ text: item.kind === "page-note" ? "page note" : item.note ? "note" : markLabel(item.style) });
+      meta.createSpan({ text: item.kind === "page-note" ? "page note" : item.kind === "area" ? "area" : item.note ? "note" : markLabel(item.style) });
       if (item.tags.length) meta.createSpan({ cls: "lumod-card-tags", text: item.tags.map(tag => `#${tag}`).join(" ") });
       meta.createSpan({ cls: "lumod-card-color", text: colorName(item.color, this.colorNames) });
       if (this.mobileRuntime) {
@@ -3070,6 +3112,13 @@ export class LumenPdfView extends FileView {
       // note follows in regular weight. Page notes have no text of their own.
       if (item.kind === "page-note") {
         card.createDiv({ cls: "lumod-card-note", text: item.note || item.quote });
+      } else if (item.kind === "area") {
+        const image = card.createDiv({ cls: "lumod-card-area" });
+        image.createEl("img", { attr: { src: this.areaImageSrc(item), alt: `Area on page ${item.page}`, loading: "lazy" } });
+        if (item.note) {
+          image.addClass("has-annotation");
+          card.createDiv({ cls: "lumod-card-annotation", text: item.note });
+        }
       } else {
         const main = card.createDiv({ cls: "lumod-card-note", text: item.quote });
         if (item.note) {
@@ -3410,6 +3459,178 @@ export class LumenPdfView extends FileView {
     if (this.inspector?.classList.contains("is-open")) this.refreshInspector();
   }
 
+  private areaImageSrc(annotation: PdfAnnotation): string {
+    return this.app.vault.adapter.getResourcePath(areaImagePath(annotation.id));
+  }
+
+  private beginAreaDraft(event: PointerEvent): void {
+    if (event.button !== 0 || this.areaDraft) return;
+    const state = this.pageStateFromEvent(event);
+    if (!state?.stage || !state.markHost) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeSelectionPalette();
+    this.closeEditor();
+    const bounds = state.stage.getBoundingClientRect();
+    const startX = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+    const startY = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+    const box = state.markHost.createDiv({ cls: "lumod-area-draft" });
+    this.areaDraft = { state, pointerId: event.pointerId, startX, startY, box };
+    this.updateAreaDraft(event);
+    const stage = state.stage;
+    stage.setPointerCapture(event.pointerId);
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId === this.areaDraft?.pointerId) this.updateAreaDraft(moveEvent);
+    };
+    const finish = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== this.areaDraft?.pointerId) return;
+      stage.removeEventListener("pointermove", move);
+      stage.removeEventListener("pointerup", finish);
+      stage.removeEventListener("pointercancel", finish);
+      if (stage.hasPointerCapture(endEvent.pointerId)) stage.releasePointerCapture(endEvent.pointerId);
+      const rect = endEvent.type === "pointerup" ? this.updateAreaDraft(endEvent) : null;
+      const pixels = stage.getBoundingClientRect();
+      this.cancelAreaDraft();
+      // The click that follows the drag must not open an annotation.
+      this.suppressNextAnnotationClick = true;
+      window.setTimeout(() => { this.suppressNextAnnotationClick = false; }, 400);
+      // Ignore taps and tiny drags.
+      if (!rect || rect.width * pixels.width < 8 || rect.height * pixels.height < 8) return;
+      this.toggleAreaMode(false);
+      this.showAreaPalette(state, rect, endEvent.clientX, endEvent.clientY);
+    };
+    stage.addEventListener("pointermove", move);
+    stage.addEventListener("pointerup", finish);
+    stage.addEventListener("pointercancel", finish);
+  }
+
+  private updateAreaDraft(event: PointerEvent): NormalizedRect | null {
+    const draft = this.areaDraft;
+    if (!draft?.state.stage) return null;
+    const bounds = draft.state.stage.getBoundingClientRect();
+    const x = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+    const y = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+    const rect = { x: Math.min(x, draft.startX), y: Math.min(y, draft.startY), width: Math.abs(x - draft.startX), height: Math.abs(y - draft.startY) };
+    draft.box.style.left = `${rect.x * 100}%`;
+    draft.box.style.top = `${rect.y * 100}%`;
+    draft.box.style.width = `${rect.width * 100}%`;
+    draft.box.style.height = `${rect.height * 100}%`;
+    return rect;
+  }
+
+  private cancelAreaDraft(): void {
+    this.areaDraft?.box.remove();
+    this.areaDraft = null;
+  }
+
+  /** Color choice for a freshly drawn area, shown where the drag ended. */
+  private showAreaPalette(state: PageState, rect: NormalizedRect, clientX: number, clientY: number): void {
+    this.selectionPalette?.remove();
+    const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-area-palette" });
+    this.prepareDetachedSurface(palette);
+    this.selectionPalette = palette;
+    const outline = state.markHost?.createDiv({ cls: "lumod-area-draft" });
+    if (outline) {
+      outline.style.left = `${rect.x * 100}%`;
+      outline.style.top = `${rect.y * 100}%`;
+      outline.style.width = `${rect.width * 100}%`;
+      outline.style.height = `${rect.height * 100}%`;
+      // The outline goes away with the palette, whichever way it closes.
+      new MutationObserver((_, observer) => {
+        if (palette.isConnected) return;
+        outline.remove();
+        observer.disconnect();
+      }).observe(palette.parentElement ?? palette, { childList: true });
+    }
+    let pendingColor: string = MARK_COLORS[0];
+    const colors = palette.createDiv({ cls: "lumod-color-row" });
+    const chips: HTMLButtonElement[] = [];
+    for (const color of this.paletteColors()) {
+      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Choose ${colorName(color, this.colorNames)}` } });
+      chip.style.setProperty("--mark-color", color);
+      chip.classList.toggle("is-active", color === pendingColor);
+      chip.addEventListener("click", event => {
+        event.stopPropagation();
+        pendingColor = color;
+        for (const item of chips) item.classList.toggle("is-active", item === chip);
+      });
+      chips.push(chip);
+    }
+    const actions = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
+    actions.append(iconButton("crop", "Save area", () => void this.commitArea(state, rect, pendingColor, false)));
+    actions.append(iconButton("message-square", "Save area and add a note", () => void this.commitArea(state, rect, pendingColor, true)));
+    actions.append(iconButton("x", "Cancel", () => this.closeSelectionPalette()));
+    if (this.mobileRuntime) return;
+    const width = palette.offsetWidth || 300;
+    palette.style.left = `${clamp(clientX - width / 2, 12, window.innerWidth - width - 12)}px`;
+    palette.style.top = `${clamp(clientY + 12, 12, window.innerHeight - 96)}px`;
+  }
+
+  /** Saves the area's picture, then the annotation, so the sidecar never refers to a missing picture. */
+  private async commitArea(state: PageState, rect: NormalizedRect, color: string, openEditor: boolean): Promise<void> {
+    this.closeSelectionPalette();
+    if (!this.bundle || !this.pdfDocument) return;
+    const bundle = this.bundle;
+    const annotation = newAnnotation(state.pageNumber, [rect], this.textInArea(state, rect), color, "box");
+    annotation.kind = "area";
+    try {
+      const image = await this.renderAreaImage(this.pdfDocument, state.pageNumber, rect);
+      await writeAreaImage(this.app.vault, annotation.id, image);
+    } catch (error) {
+      console.error("Could not save the area picture", error);
+      new Notice("Could not save a picture of the area. The area is still marked.", 6000);
+    }
+    if (bundle !== this.bundle) return;
+    this.index.put(annotation);
+    bundle.repository.queue({ op: "put", annotation });
+    this.renderMarks(state.pageNumber);
+    this.refreshInspector();
+    if (!openEditor) return;
+    const mark = this.pages.get(state.pageNumber)?.markHost?.querySelector<HTMLElement>(`[data-annotation-id="${annotation.id}"]`);
+    if (mark) this.openEditor(annotation, mark);
+  }
+
+  /** The text-layer text whose centre lies inside the area, so areas are searchable. */
+  private textInArea(state: PageState, rect: NormalizedRect): string {
+    if (!state.stage || !state.textHost) return "";
+    const bounds = state.stage.getBoundingClientRect();
+    const words: string[] = [];
+    for (const span of Array.from(state.textHost.querySelectorAll("span"))) {
+      if (span.querySelector("span")) continue;
+      const box = span.getBoundingClientRect();
+      const x = (box.left + box.width / 2 - bounds.left) / bounds.width;
+      const y = (box.top + box.height / 2 - bounds.top) / bounds.height;
+      if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) words.push(span.textContent ?? "");
+    }
+    return words.join(" ").replace(/\s+/g, " ").trim().slice(0, 4000);
+  }
+
+  /** Renders just the area of the page, sharp enough to read, as PNG data. */
+  private async renderAreaImage(pdfDocument: PDFDocumentProxy, pageNumber: number, rect: NormalizedRect): Promise<ArrayBuffer> {
+    const page = await pdfDocument.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const areaWidth = Math.max(1, rect.width * base.width);
+    const areaHeight = Math.max(1, rect.height * base.height);
+    // About 1600px wide, at least 1.5× and at most 4× the PDF size, and no more than 6 megapixels.
+    const scale = Math.min(clamp(1600 / areaWidth, 1.5, 4), Math.sqrt(6_000_000 / (areaWidth * areaHeight)));
+    const viewport = page.getViewport({ scale });
+    const canvas = createEl("canvas");
+    canvas.width = Math.max(1, Math.round(rect.width * viewport.width));
+    canvas.height = Math.max(1, Math.round(rect.height * viewport.height));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas is unavailable");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({
+      canvasContext: context,
+      viewport,
+      transform: [1, 0, 0, 1, -rect.x * viewport.width, -rect.y * viewport.height],
+    }).promise;
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("Could not encode the picture");
+    return blob.arrayBuffer();
+  }
+
   private placePageNote(event: MouseEvent, state: PageState): void {
     if (!this.bundle || !state.stage) return;
     const bounds = state.stage.getBoundingClientRect();
@@ -3747,6 +3968,9 @@ export class LumenPdfView extends FileView {
     this.mountedPages.clear();
     this.pageNotePlacement = false;
     this.pageNoteButton = null;
+    this.areaMode = false;
+    this.areaDraft = null;
+    this.areaButton = null;
     this.outlineButton = null;
     this.themeButton = null;
     this.outlineEntries = [];

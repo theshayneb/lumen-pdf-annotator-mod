@@ -2175,3 +2175,72 @@
   background: var(--background-primary);
   border-top: 1px solid var(--background-modifier-border);
 }
+
+/* Area annotations: a box around an image or table, saved as a picture. */
+.lumod-reader.is-capturing-area .lumod-page-stage {
+  cursor: crosshair;
+  touch-action: none;
+}
+.lumod-reader.is-capturing-area .lumod-text-layer,
+.lumod-reader.is-capturing-area .lumod-mark {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.lumod-area-draft {
+  position: absolute;
+  border: 2px dashed var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  pointer-events: none;
+}
+.lumod-mark.is-area {
+  pointer-events: none;
+  border-radius: 3px;
+}
+.lumod-area-handle {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px 0 6px 0;
+  background: var(--mark-color);
+  color: rgba(22, 22, 22, .84);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.lumod-reader.is-capturing-area .lumod-area-handle {
+  pointer-events: none;
+}
+.lumod-area-handle svg {
+  width: 14px;
+  height: 14px;
+}
+.lumod-editor-area img,
+.lumod-card-area img {
+  display: block;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left top;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: #fff;
+}
+.lumod-editor-area {
+  margin: 8px 0;
+}
+.lumod-editor-area img {
+  max-height: 240px;
+}
+.lumod-editor-area.is-compact img {
+  max-height: 140px;
+}
+.lumod-card-area img {
+  max-height: 72px;
+}
+.lumod-card-area.has-annotation img {
+  max-height: 46px;
+}

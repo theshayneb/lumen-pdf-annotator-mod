@@ -123,6 +123,21 @@ async function documentHash(vault: Vault, file: TFile, bytes: ArrayBuffer): Prom
   return hash;
 }
 
+/** Where the picture of an area annotation is saved. */
+export function areaImagePath(id: string): string {
+  return `${STORAGE_FOLDER}/images/${id}.png`;
+}
+
+/** Saves the picture of an area annotation, replacing any earlier one. */
+export async function writeAreaImage(vault: Vault, id: string, data: ArrayBuffer): Promise<string> {
+  const path = areaImagePath(id);
+  await ensureFolder(vault, path.slice(0, path.lastIndexOf("/")));
+  const existing = vault.getAbstractFileByPath(path);
+  if (existing instanceof TFile) await vault.modifyBinary(existing, data);
+  else await vault.createBinary(path, data);
+  return path;
+}
+
 async function ensureFolder(vault: Vault, path: string): Promise<void> {
   let current = "";
   for (const part of normalizePath(path).split("/")) {
@@ -236,7 +251,7 @@ function normalizeAnnotation(value: unknown): PdfAnnotation | null {
   // Text marks made across a page break before 1.0.18 could include whole-page
   // boxes (the page's canvas and mark layers). Drop those when the mark also
   // has real text boxes, so older highlights render correctly.
-  if (item.kind !== "page-note" && rects.length > 1) {
+  if (item.kind !== "page-note" && item.kind !== "area" && rects.length > 1) {
     const textRects = rects.filter(rect => !(rect.width >= 0.95 && rect.height >= 0.9));
     if (textRects.length) rects.splice(0, rects.length, ...textRects);
   }
@@ -245,7 +260,7 @@ function normalizeAnnotation(value: unknown): PdfAnnotation | null {
   return {
     id: item.id,
     groupId: typeof item.groupId === "string" && item.groupId.trim() ? item.groupId : undefined,
-    kind: item.kind === "page-note" ? "page-note" : "text",
+    kind: item.kind === "page-note" || item.kind === "area" ? item.kind : "text",
     page,
     rects,
     quote: typeof item.quote === "string" ? item.quote : item.kind === "page-note" ? "Page note" : "",
