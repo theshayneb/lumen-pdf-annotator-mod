@@ -2,7 +2,7 @@ import { FuzzySuggestModal, Modal, normalizePath, Notice, ObsidianProtocolData, 
 import type { SettingDefinitionItem } from "obsidian";
 import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
-import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, migrateStorageFolder, restoreBundle, verifyBundle } from "./storage";
+import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, migrateAreaImages, migrateStorageFolder, restoreBundle, verifyBundle } from "./storage";
 import type { SidecarGrouping } from "./annotation-export";
 import { InterfaceTheme, LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
@@ -72,6 +72,10 @@ export default class LumenPdfPlugin extends Plugin {
     } catch (error) {
       console.error("PDF Annotator could not move its storage folder", error);
     }
+    this.app.workspace.onLayoutReady(() => {
+      migrateAreaImages(this.app.vault, (file, path) => this.app.fileManager.renameFile(file, path))
+        .catch(error => console.error("PDF Annotator could not move area pictures", error));
+    });
     this.viewState = new PdfViewStateManager(this, state => this.saveMergedData({ pdfViewState: state }));
     await this.viewState.load();
     this.registerView(LUMEN_VIEW_TYPE, leaf => new LumenPdfView(

@@ -1,4 +1,4 @@
-import { normalizePath, TFile, Vault } from "obsidian";
+import { normalizePath, TFile, TFolder, Vault } from "obsidian";
 import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MarkStyle, normalizeColorNames, normalizeColorOrder, normalizeExtraColors, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
@@ -123,9 +123,32 @@ async function documentHash(vault: Vault, file: TFile, bytes: ArrayBuffer): Prom
   return hash;
 }
 
+/** Pictures of area annotations go in the vault's attachments folder. */
+export const AREA_IMAGE_FOLDER = "Attachments";
+// 1.0.27–1.0.28 kept them in the plugin's own folder.
+const PREVIOUS_AREA_IMAGE_FOLDER = `${STORAGE_FOLDER}/images`;
+
 /** Where the picture of an area annotation is saved. */
 export function areaImagePath(id: string): string {
-  return `${STORAGE_FOLDER}/images/${id}.png`;
+  return `${AREA_IMAGE_FOLDER}/pdf-area-${id}.png`;
+}
+
+/**
+ * Moves pictures saved by 1.0.27–1.0.28 into AREA_IMAGE_FOLDER. `rename` should
+ * update links (Obsidian's file manager), so sidecars that embed them follow.
+ * The old folder is removed once empty.
+ */
+export async function migrateAreaImages(vault: Vault, rename: (file: TFile, path: string) => Promise<void>): Promise<void> {
+  const folder = vault.getAbstractFileByPath(PREVIOUS_AREA_IMAGE_FOLDER);
+  if (!(folder instanceof TFolder)) return;
+  for (const file of folder.children.slice()) {
+    if (!(file instanceof TFile) || file.extension !== "png") continue;
+    const target = areaImagePath(file.basename);
+    if (vault.getAbstractFileByPath(target)) continue;
+    await ensureFolder(vault, AREA_IMAGE_FOLDER);
+    await rename(file, target);
+  }
+  await removeIfEmpty(vault, PREVIOUS_AREA_IMAGE_FOLDER);
 }
 
 /** Saves the picture of an area annotation, replacing any earlier one. */
