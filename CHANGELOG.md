@@ -2,6 +2,11 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.31 — 2026-10-19
+
+- Fixed sidecar notes not updating (automatically or on export) when Obsidian had shortened the `Related` link to just the PDF's name, when the note had been moved out of the vault root, or when the `%% lumen-sidecar-end %%` line had been deleted. The plugin now finds the sidecar through the notes that link to the PDF and resolves the link the way Obsidian does.
+- If an automatic sidecar update fails, a message now says why instead of failing silently.
+
 ## 1.0.30 — 2026-10-19
 
 - Exported sidecar notes now update automatically after each annotation change, on by default (**Keep exported sidecar notes up to date**). Only PDFs whose sidecar you have exported are updated, so no new notes appear on their own, and the heading order you chose is kept.

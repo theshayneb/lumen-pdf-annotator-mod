@@ -15,7 +15,7 @@ import {
   ResolvedOutlineEntry,
   resolvePdfOutline,
 } from "./outline";
-import { existingSidecarPath, SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
+import { existingSidecarPath, SidecarConflictError, SidecarGrouping, SidecarLookup, writeSidecar } from "./annotation-export";
 import { areaImagePath, DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
@@ -671,7 +671,18 @@ export class LumenPdfView extends FileView {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;
     if (!this.bundle || !this.bundleFile) return null;
-    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder);
+    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder, this.sidecarLookup());
+  }
+
+  /** Lets the sidecar be found after it is moved or its PDF link is shortened. */
+  private sidecarLookup(): SidecarLookup {
+    const cache = this.app.metadataCache;
+    return {
+      linkedFrom: pdf => Object.entries(cache.resolvedLinks)
+        .filter(([source, targets]) => source.endsWith(".md") && targets[pdf.path])
+        .map(([source]) => source),
+      resolve: (link, sourcePath) => cache.getFirstLinkpathDest(link, sourcePath),
+    };
   }
 
   /** Show the sidecar note: focus its tab if it is already open, else open it in a new tab. */
@@ -729,14 +740,16 @@ export class LumenPdfView extends FileView {
   /** Rewrites the sidecar after a change, but only once it has been exported. */
   private async syncSidecar(): Promise<void> {
     try {
-      if (!this.bundleFile || !(await existingSidecarPath(this.app.vault, this.bundleFile))) return;
+      if (!this.bundleFile || !(await existingSidecarPath(this.app.vault, this.bundleFile, this.sidecarLookup()))) return;
       await this.exportSidecar();
     } catch (error) {
       if (error instanceof SidecarConflictError) {
         if (!this.sidecarConflictReported) new Notice(`Sidecar not updated: ${error.message}`, 8000);
         this.sidecarConflictReported = true;
       } else {
-        console.error("Lumen could not update the sidecar note", error);
+        console.error("Could not update the sidecar note", error);
+        if (!this.sidecarConflictReported) new Notice(`Sidecar not updated: ${error instanceof Error ? error.message : String(error)}`, 8000);
+        this.sidecarConflictReported = true;
       }
     }
   }

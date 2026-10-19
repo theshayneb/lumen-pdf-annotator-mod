@@ -257,11 +257,26 @@ function relatedLinkTarget(frontmatter: string): string | null {
   return value.match(/^\[\[([^|\]]+)/)?.[1]?.trim() ?? null;
 }
 
-/** The PDF path a sidecar was written for, "" if unknown, or null if the note is not a sidecar. */
-function sidecarOwner(content: string): string | null {
+/**
+ * Finds notes linking to a PDF and resolves link text to files, so a sidecar
+ * can be recognised after it is moved or after Obsidian shortens its link.
+ */
+export interface SidecarLookup {
+  /** Markdown notes that link to the PDF (frontmatter links included). */
+  linkedFrom(pdf: TFile): string[];
+  /** The file a link in `sourcePath` points to, if any. */
+  resolve(link: string, sourcePath: string): TFile | null;
+}
+
+/**
+ * The PDF link a sidecar was written for, "" if unknown, or null if the note
+ * is not a sidecar. `named` says the note has the sidecar's own file name,
+ * where a `Related` link alone is enough even if the end marker was deleted.
+ */
+function sidecarOwner(content: string, named = false): string | null {
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
   if (frontmatter === undefined) return null;
-  const related = content.includes(SIDECAR_END_PREFIX) ? relatedLinkTarget(frontmatter) : null;
+  const related = named || content.includes(SIDECAR_END_PREFIX) ? relatedLinkTarget(frontmatter) : null;
   if (related !== null) return related;
   const pdf = frontmatterValue(frontmatter, PREVIOUS_PDF_KEY);
   if (pdf !== null) return pdf;
@@ -272,51 +287,76 @@ function sidecarOwner(content: string): string | null {
   return frontmatter.match(/^pdf:\s*"\[\[(.+?)\|/m)?.[1] ?? "";
 }
 
-/**
- * This PDF's sidecar in the vault root: the first of `<pdf name>.md`,
- * `<pdf name> 2.md`, … that is free or already this PDF's sidecar. Notes the
- * user wrote and other PDFs' sidecars are skipped, never overwritten.
- */
-export async function sidecarPath(vault: Vault, pdf: TFile): Promise<string> {
+/** Whether the note at `path` is this PDF's sidecar (true), another note (false), or an old sidecar of unknown PDF (true). */
+function ownsPdf(content: string, path: string, pdf: TFile, lookup: SidecarLookup | undefined, named: boolean): boolean {
+  const owner = sidecarOwner(content, named);
+  if (owner === null) return false;
+  if (owner === "" || owner === pdf.path) return true;
+  return lookup?.resolve(owner, path)?.path === pdf.path;
+}
+
+/** This PDF's sidecar wherever it is: first notes linking to the PDF (it may have been moved), then the vault root names. */
+async function findSidecar(vault: Vault, pdf: TFile, lookup?: SidecarLookup): Promise<{ path: string | null; free: string | null }> {
+  for (const path of lookup?.linkedFrom(pdf) ?? []) {
+    const file = vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile) || file.extension !== "md") continue;
+    const named = (file.parent?.isRoot() ?? true) && /^(.*?)(?: \d+)?$/.exec(file.basename)?.[1] === pdf.basename;
+    if (ownsPdf(await vault.cachedRead(file), path, pdf, lookup, named)) return { path, free: null };
+  }
   for (let attempt = 1; attempt <= 100; attempt++) {
     const path = sidecarCandidate(pdf, attempt);
     const existing = vault.getAbstractFileByPath(path);
-    if (!existing) return path;
-    if (!(existing instanceof TFile)) continue;
-    const owner = sidecarOwner(await vault.cachedRead(existing));
-    if (owner === pdf.path || owner === "") return path;
+    if (!existing) return { path: null, free: path };
+    if (existing instanceof TFile && ownsPdf(await vault.cachedRead(existing), path, pdf, lookup, true)) return { path, free: null };
   }
-  throw new SidecarConflictError(sidecarCandidate(pdf, 1));
+  return { path: null, free: null };
+}
+
+/**
+ * This PDF's sidecar: the note already written for it (even if moved), else
+ * the first of `<pdf name>.md`, `<pdf name> 2.md`, … in the vault root that is
+ * free. Notes the user wrote and other PDFs' sidecars are never overwritten.
+ */
+export async function sidecarPath(vault: Vault, pdf: TFile, lookup?: SidecarLookup): Promise<string> {
+  const found = await findSidecar(vault, pdf, lookup);
+  const path = found.path ?? found.free;
+  if (!path) throw new SidecarConflictError(sidecarCandidate(pdf, 1));
+  return path;
 }
 
 /** This PDF's sidecar if one has been exported (and not deleted), else null. */
-export async function existingSidecarPath(vault: Vault, pdf: TFile): Promise<string | null> {
-  for (let attempt = 1; attempt <= 100; attempt++) {
-    const path = sidecarCandidate(pdf, attempt);
-    const existing = vault.getAbstractFileByPath(path);
-    if (!existing) return null;
-    if (existing instanceof TFile && sidecarOwner(await vault.cachedRead(existing)) === pdf.path) return path;
-  }
-  return null;
+export async function existingSidecarPath(vault: Vault, pdf: TFile, lookup?: SidecarLookup): Promise<string | null> {
+  return (await findSidecar(vault, pdf, lookup)).path;
+}
+
+/** Text the user wrote below the end marker, which a re-export keeps. */
+function keptText(content: string): string {
+  const start = content.indexOf(SIDECAR_END_PREFIX);
+  if (start === -1) return "";
+  const close = content.indexOf("%%", start + SIDECAR_END_PREFIX.length);
+  if (close === -1) return "";
+  return content.slice(close + 2).replace(/^\r?\n/, "");
 }
 
 /**
- * Write `<pdf name>.md` in the vault root. Existing notes are overwritten only
- * when they are this PDF's sidecar, and text the user added below the end
- * marker is carried over.
+ * Write the sidecar (`<pdf name>.md` in the vault root, or wherever it was
+ * moved). Existing notes are overwritten only when they are this PDF's
+ * sidecar, and text the user added below the end marker is carried over.
  */
-export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = []): Promise<string> {
-  const path = await sidecarPath(vault, pdf);
+export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = [], lookup?: SidecarLookup): Promise<string> {
+  const path = await sidecarPath(vault, pdf, lookup);
   const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping, names, order);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
+    let changed = false;
     await vault.process(existing, content => {
-      const owner = sidecarOwner(content);
-      if (owner !== pdf.path && owner !== "") return content;
-      const end = content.indexOf(SIDECAR_END);
-      const kept = end === -1 ? "" : content.slice(end + SIDECAR_END.length).replace(/^\r?\n/, "");
-      return generated + kept;
+      // Checked again in case the note changed since it was found.
+      const named = (existing.parent?.isRoot() ?? true) && /^(.*?)(?: \d+)?$/.exec(existing.basename)?.[1] === pdf.basename;
+      if (!ownsPdf(content, path, pdf, lookup, named || content.includes(SIDECAR_END_PREFIX))) return content;
+      changed = true;
+      return generated + keptText(content);
     });
+    if (!changed) throw new Error(`${path} no longer looks like this PDF's sidecar, so it was left unchanged.`);
   } else if (existing) {
     throw new SidecarConflictError(path);
   } else {
