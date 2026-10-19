@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.28 — 2026-10-19
+
+- Areas can span pages: drag past the bottom of a page and the box continues onto the following pages (the view scrolls when you hold near the top or bottom edge). Each page shows its part, they act as one annotation, and the picture stacks the parts top to bottom into one image.
+
 ## 1.0.27 — 2026-10-19
 
 - **Area annotations.** The new **Capture an area** toolbar button (and command) lets you drag a box around an image, chart or table. It gets a color, note and tags like a highlight. A picture of the area is saved to `Utilities/PDF Annotator/images/` and embedded in the sidecar note in place of the highlighted text; the Annotations panel and editor show the picture too. Text inside the area is kept for search. Deleting an area moves its picture to the trash.

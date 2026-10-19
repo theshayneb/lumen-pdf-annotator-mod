@@ -8,7 +8,7 @@ import { areaImagePath } from "./storage";
 
 /** An embed of an area annotation's saved picture. */
 function areaEmbed(annotation: PdfAnnotation): string {
-  return `![[${areaImagePath(annotation.id)}]]`;
+  return `![[${areaImagePath(annotation.groupId || annotation.id)}]]`;
 }
 
 export type SidecarGrouping = "page" | "color";

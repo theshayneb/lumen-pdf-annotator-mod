@@ -109,6 +109,29 @@ interface PendingSelection {
   y: number;
 }
 
+/** A point on a page, in that page's 0–1 coordinates. */
+interface AreaPoint {
+  page: number;
+  x: number;
+  y: number;
+}
+
+/** One page's part of an area annotation. */
+interface AreaPiece {
+  page: number;
+  rect: NormalizedRect;
+}
+
+interface AreaDraft {
+  pointerId: number;
+  start: AreaPoint;
+  end: AreaPoint;
+  boxes: Map<number, HTMLElement>;
+  clientX: number;
+  clientY: number;
+  scrollFrame: number;
+}
+
 interface SearchHit {
   page: number;
   start: number;
@@ -324,7 +347,7 @@ export class LumenPdfView extends FileView {
   private pageNoteButton: HTMLButtonElement | null = null;
   private areaMode = false;
   private areaButton: HTMLButtonElement | null = null;
-  private areaDraft: { state: PageState; pointerId: number; startX: number; startY: number; box: HTMLElement } | null = null;
+  private areaDraft: AreaDraft | null = null;
   private readonly pageTextCache = new Map<number, SearchPageData>();
   private pageTextCacheChars = 0;
   private pageTextCacheSpans = 0;
@@ -2936,7 +2959,7 @@ export class LumenPdfView extends FileView {
     tags.addEventListener("change", saveTags);
     const actions = container.createDiv({ cls: "lumod-editor-actions" });
     if (annotation.kind === "area") {
-      actions.append(iconButton("copy", "Copy image embed", () => void this.writeClipboard(`![[${areaImagePath(annotation.id)}]]`)));
+      actions.append(iconButton("copy", "Copy image embed", () => void this.writeClipboard(`![[${areaImagePath(annotation.groupId || annotation.id)}]]`)));
     } else actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
     if (annotation.kind === "text") {
       actions.append(iconButton("scan-text", "Extend annotation", () => this.beginExtension(annotation)));
@@ -2983,7 +3006,7 @@ export class LumenPdfView extends FileView {
       this.index.remove(current.id);
       this.bundle.repository.queue({ op: "remove", id: current.id, at: now });
       pages.add(current.page);
-      if (current.kind === "area") {
+      if (current.kind === "area" && !current.groupId) {
         const image = this.app.vault.getAbstractFileByPath(areaImagePath(current.id));
         if (image) void this.app.fileManager.trashFile(image);
       }
@@ -3459,89 +3482,161 @@ export class LumenPdfView extends FileView {
     if (this.inspector?.classList.contains("is-open")) this.refreshInspector();
   }
 
+  /** The picture of an area belongs to its first part, so every part of a multi-page area shows the same picture. */
   private areaImageSrc(annotation: PdfAnnotation): string {
-    return this.app.vault.adapter.getResourcePath(areaImagePath(annotation.id));
+    return this.app.vault.adapter.getResourcePath(areaImagePath(annotation.groupId || annotation.id));
+  }
+
+  /** The page under a screen point, with the point in that page's 0–1 coordinates; gaps count as the nearest page. */
+  private areaPointAt(clientX: number, clientY: number): AreaPoint | null {
+    let best: { state: PageState; distance: number } | null = null;
+    for (const state of this.pages.values()) {
+      if (!state.mounted || !state.stage) continue;
+      const bounds = state.stage.getBoundingClientRect();
+      if (!bounds.height) continue;
+      const distance = clientY < bounds.top ? bounds.top - clientY : clientY > bounds.bottom ? clientY - bounds.bottom : 0;
+      if (!best || distance < best.distance) best = { state, distance };
+      if (!distance) break;
+    }
+    if (!best?.state.stage) return null;
+    const bounds = best.state.stage.getBoundingClientRect();
+    return {
+      page: best.state.pageNumber,
+      x: clamp((clientX - bounds.left) / bounds.width, 0, 1),
+      y: clamp((clientY - bounds.top) / bounds.height, 0, 1),
+    };
+  }
+
+  /** The parts of the box from one corner to the other, one per page it crosses. */
+  private areaPieces(from: AreaPoint, to: AreaPoint): AreaPiece[] {
+    const [top, bottom] = from.page < to.page || (from.page === to.page && from.y <= to.y) ? [from, to] : [to, from];
+    const x = Math.min(from.x, to.x);
+    const width = Math.abs(from.x - to.x);
+    const pieces: AreaPiece[] = [];
+    for (let page = top.page; page <= bottom.page; page++) {
+      const y = page === top.page ? top.y : 0;
+      const end = page === bottom.page ? bottom.y : 1;
+      if (end > y) pieces.push({ page, rect: { x, y, width, height: end - y } });
+    }
+    return pieces;
   }
 
   private beginAreaDraft(event: PointerEvent): void {
     if (event.button !== 0 || this.areaDraft) return;
-    const state = this.pageStateFromEvent(event);
-    if (!state?.stage || !state.markHost) return;
+    const start = this.pageStateFromEvent(event) ? this.areaPointAt(event.clientX, event.clientY) : null;
+    if (!start) return;
     event.preventDefault();
     event.stopPropagation();
     this.closeSelectionPalette();
     this.closeEditor();
-    const bounds = state.stage.getBoundingClientRect();
-    const startX = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
-    const startY = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
-    const box = state.markHost.createDiv({ cls: "lumod-area-draft" });
-    this.areaDraft = { state, pointerId: event.pointerId, startX, startY, box };
-    this.updateAreaDraft(event);
-    const stage = state.stage;
-    stage.setPointerCapture(event.pointerId);
+    const draft: AreaDraft = { pointerId: event.pointerId, start, end: start, boxes: new Map(), clientX: event.clientX, clientY: event.clientY, scrollFrame: 0 };
+    this.areaDraft = draft;
+    const host = this.pagesEl;
+    host.setPointerCapture(event.pointerId);
     const move = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId === this.areaDraft?.pointerId) this.updateAreaDraft(moveEvent);
+      if (moveEvent.pointerId !== draft.pointerId) return;
+      draft.clientX = moveEvent.clientX;
+      draft.clientY = moveEvent.clientY;
+      this.updateAreaDraft();
     };
+    // Scroll while the pointer is held near the top or bottom edge, so a box can reach further pages.
+    const autoScroll = () => {
+      if (this.areaDraft !== draft) return;
+      const bounds = this.scrollEl.getBoundingClientRect();
+      const edge = 48;
+      const speed = draft.clientY < bounds.top + edge ? -(bounds.top + edge - draft.clientY) : draft.clientY > bounds.bottom - edge ? draft.clientY - (bounds.bottom - edge) : 0;
+      if (speed) {
+        this.scrollEl.scrollTop += clamp(speed, -edge, edge) / 2;
+        this.updateAreaDraft();
+      }
+      draft.scrollFrame = window.requestAnimationFrame(autoScroll);
+    };
+    draft.scrollFrame = window.requestAnimationFrame(autoScroll);
     const finish = (endEvent: PointerEvent) => {
-      if (endEvent.pointerId !== this.areaDraft?.pointerId) return;
-      stage.removeEventListener("pointermove", move);
-      stage.removeEventListener("pointerup", finish);
-      stage.removeEventListener("pointercancel", finish);
-      if (stage.hasPointerCapture(endEvent.pointerId)) stage.releasePointerCapture(endEvent.pointerId);
-      const rect = endEvent.type === "pointerup" ? this.updateAreaDraft(endEvent) : null;
-      const pixels = stage.getBoundingClientRect();
+      if (endEvent.pointerId !== draft.pointerId) return;
+      host.removeEventListener("pointermove", move);
+      host.removeEventListener("pointerup", finish);
+      host.removeEventListener("pointercancel", finish);
+      if (host.hasPointerCapture(endEvent.pointerId)) host.releasePointerCapture(endEvent.pointerId);
+      draft.clientX = endEvent.clientX;
+      draft.clientY = endEvent.clientY;
+      if (endEvent.type === "pointerup") this.updateAreaDraft();
+      const pieces = endEvent.type === "pointerup" ? this.areaPieces(draft.start, draft.end) : [];
       this.cancelAreaDraft();
       // The click that follows the drag must not open an annotation.
       this.suppressNextAnnotationClick = true;
       window.setTimeout(() => { this.suppressNextAnnotationClick = false; }, 400);
       // Ignore taps and tiny drags.
-      if (!rect || rect.width * pixels.width < 8 || rect.height * pixels.height < 8) return;
+      let widthPx = 0;
+      let heightPx = 0;
+      for (const piece of pieces) {
+        const bounds = this.pages.get(piece.page)?.stage?.getBoundingClientRect();
+        if (!bounds) continue;
+        widthPx = Math.max(widthPx, piece.rect.width * bounds.width);
+        heightPx += piece.rect.height * bounds.height;
+      }
+      if (!pieces.length || widthPx < 8 || heightPx < 8) return;
       this.toggleAreaMode(false);
-      this.showAreaPalette(state, rect, endEvent.clientX, endEvent.clientY);
+      this.showAreaPalette(pieces, endEvent.clientX, endEvent.clientY);
     };
-    stage.addEventListener("pointermove", move);
-    stage.addEventListener("pointerup", finish);
-    stage.addEventListener("pointercancel", finish);
+    host.addEventListener("pointermove", move);
+    host.addEventListener("pointerup", finish);
+    host.addEventListener("pointercancel", finish);
+    this.updateAreaDraft();
   }
 
-  private updateAreaDraft(event: PointerEvent): NormalizedRect | null {
+  private updateAreaDraft(): void {
     const draft = this.areaDraft;
-    if (!draft?.state.stage) return null;
-    const bounds = draft.state.stage.getBoundingClientRect();
-    const x = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
-    const y = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
-    const rect = { x: Math.min(x, draft.startX), y: Math.min(y, draft.startY), width: Math.abs(x - draft.startX), height: Math.abs(y - draft.startY) };
-    draft.box.style.left = `${rect.x * 100}%`;
-    draft.box.style.top = `${rect.y * 100}%`;
-    draft.box.style.width = `${rect.width * 100}%`;
-    draft.box.style.height = `${rect.height * 100}%`;
-    return rect;
+    if (!draft) return;
+    draft.end = this.areaPointAt(draft.clientX, draft.clientY) ?? draft.end;
+    this.drawAreaOutlines(draft.boxes, this.areaPieces(draft.start, draft.end));
+  }
+
+  /** Shows a dashed outline for each part of the box, reusing `boxes` and removing parts no longer covered. */
+  private drawAreaOutlines(boxes: Map<number, HTMLElement>, pieces: AreaPiece[]): void {
+    const pages = new Set(pieces.map(piece => piece.page));
+    for (const [page, box] of boxes) {
+      if (pages.has(page)) continue;
+      box.remove();
+      boxes.delete(page);
+    }
+    for (const piece of pieces) {
+      const host = this.pages.get(piece.page)?.markHost;
+      if (!host) continue;
+      let box = boxes.get(piece.page);
+      if (!box || !box.isConnected) {
+        box = host.createDiv({ cls: "lumod-area-draft" });
+        boxes.set(piece.page, box);
+      }
+      box.style.left = `${piece.rect.x * 100}%`;
+      box.style.top = `${piece.rect.y * 100}%`;
+      box.style.width = `${piece.rect.width * 100}%`;
+      box.style.height = `${piece.rect.height * 100}%`;
+    }
   }
 
   private cancelAreaDraft(): void {
-    this.areaDraft?.box.remove();
+    const draft = this.areaDraft;
+    if (!draft) return;
+    window.cancelAnimationFrame(draft.scrollFrame);
+    for (const box of draft.boxes.values()) box.remove();
     this.areaDraft = null;
   }
 
   /** Color choice for a freshly drawn area, shown where the drag ended. */
-  private showAreaPalette(state: PageState, rect: NormalizedRect, clientX: number, clientY: number): void {
+  private showAreaPalette(pieces: AreaPiece[], clientX: number, clientY: number): void {
     this.selectionPalette?.remove();
     const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-area-palette" });
     this.prepareDetachedSurface(palette);
     this.selectionPalette = palette;
-    const outline = state.markHost?.createDiv({ cls: "lumod-area-draft" });
-    if (outline) {
-      outline.style.left = `${rect.x * 100}%`;
-      outline.style.top = `${rect.y * 100}%`;
-      outline.style.width = `${rect.width * 100}%`;
-      outline.style.height = `${rect.height * 100}%`;
-      // The outline goes away with the palette, whichever way it closes.
-      new MutationObserver((_, observer) => {
-        if (palette.isConnected) return;
-        outline.remove();
-        observer.disconnect();
-      }).observe(palette.parentElement ?? palette, { childList: true });
-    }
+    const outlines = new Map<number, HTMLElement>();
+    this.drawAreaOutlines(outlines, pieces);
+    // The outlines go away with the palette, whichever way it closes.
+    new MutationObserver((_, observer) => {
+      if (palette.isConnected) return;
+      for (const box of outlines.values()) box.remove();
+      observer.disconnect();
+    }).observe(palette.parentElement ?? palette, { childList: true });
     let pendingColor: string = MARK_COLORS[0];
     const colors = palette.createDiv({ cls: "lumod-color-row" });
     const chips: HTMLButtonElement[] = [];
@@ -3557,8 +3652,8 @@ export class LumenPdfView extends FileView {
       chips.push(chip);
     }
     const actions = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
-    actions.append(iconButton("crop", "Save area", () => void this.commitArea(state, rect, pendingColor, false)));
-    actions.append(iconButton("message-square", "Save area and add a note", () => void this.commitArea(state, rect, pendingColor, true)));
+    actions.append(iconButton("crop", "Save area", () => void this.commitArea(pieces, pendingColor, false)));
+    actions.append(iconButton("message-square", "Save area and add a note", () => void this.commitArea(pieces, pendingColor, true)));
     actions.append(iconButton("x", "Cancel", () => this.closeSelectionPalette()));
     if (this.mobileRuntime) return;
     const width = palette.offsetWidth || 300;
@@ -3566,33 +3661,47 @@ export class LumenPdfView extends FileView {
     palette.style.top = `${clamp(clientY + 12, 12, window.innerHeight - 96)}px`;
   }
 
-  /** Saves the area's picture, then the annotation, so the sidecar never refers to a missing picture. */
-  private async commitArea(state: PageState, rect: NormalizedRect, color: string, openEditor: boolean): Promise<void> {
+  /**
+   * Saves the area's picture, then the annotation (one part per page, grouped
+   * like a highlight across a page break), so the sidecar never refers to a
+   * missing picture.
+   */
+  private async commitArea(pieces: AreaPiece[], color: string, openEditor: boolean): Promise<void> {
     this.closeSelectionPalette();
-    if (!this.bundle || !this.pdfDocument) return;
+    if (!this.bundle || !this.pdfDocument || !pieces.length) return;
     const bundle = this.bundle;
-    const annotation = newAnnotation(state.pageNumber, [rect], this.textInArea(state, rect), color, "box");
-    annotation.kind = "area";
+    const quote = pieces.map(piece => this.textInArea(piece)).filter(Boolean).join(" ");
+    const parts = pieces.map(piece => {
+      const annotation = newAnnotation(piece.page, [piece.rect], quote, color, "box");
+      annotation.kind = "area";
+      return annotation;
+    });
+    const first = parts[0];
+    for (const part of parts.slice(1)) part.groupId = first.id;
     try {
-      const image = await this.renderAreaImage(this.pdfDocument, state.pageNumber, rect);
-      await writeAreaImage(this.app.vault, annotation.id, image);
+      const image = await this.renderAreaImage(this.pdfDocument, pieces);
+      await writeAreaImage(this.app.vault, first.id, image);
     } catch (error) {
       console.error("Could not save the area picture", error);
       new Notice("Could not save a picture of the area. The area is still marked.", 6000);
     }
     if (bundle !== this.bundle) return;
-    this.index.put(annotation);
-    bundle.repository.queue({ op: "put", annotation });
-    this.renderMarks(state.pageNumber);
+    for (const part of parts) {
+      this.index.put(part);
+      bundle.repository.queue({ op: "put", annotation: part });
+    }
+    for (const piece of pieces) this.renderMarks(piece.page);
     this.refreshInspector();
     if (!openEditor) return;
-    const mark = this.pages.get(state.pageNumber)?.markHost?.querySelector<HTMLElement>(`[data-annotation-id="${annotation.id}"]`);
-    if (mark) this.openEditor(annotation, mark);
+    const mark = this.pages.get(first.page)?.markHost?.querySelector<HTMLElement>(`[data-annotation-id="${first.id}"]`);
+    if (mark) this.openEditor(first, mark);
   }
 
-  /** The text-layer text whose centre lies inside the area, so areas are searchable. */
-  private textInArea(state: PageState, rect: NormalizedRect): string {
-    if (!state.stage || !state.textHost) return "";
+  /** The text-layer text whose centre lies inside one part of an area, so areas are searchable. */
+  private textInArea(piece: AreaPiece): string {
+    const state = this.pages.get(piece.page);
+    if (!state?.stage || !state.textHost) return "";
+    const rect = piece.rect;
     const bounds = state.stage.getBoundingClientRect();
     const words: string[] = [];
     for (const span of Array.from(state.textHost.querySelectorAll("span"))) {
@@ -3605,27 +3714,50 @@ export class LumenPdfView extends FileView {
     return words.join(" ").replace(/\s+/g, " ").trim().slice(0, 4000);
   }
 
-  /** Renders just the area of the page, sharp enough to read, as PNG data. */
-  private async renderAreaImage(pdfDocument: PDFDocumentProxy, pageNumber: number, rect: NormalizedRect): Promise<ArrayBuffer> {
-    const page = await pdfDocument.getPage(pageNumber);
-    const base = page.getViewport({ scale: 1 });
-    const areaWidth = Math.max(1, rect.width * base.width);
-    const areaHeight = Math.max(1, rect.height * base.height);
-    // About 1600px wide, at least 1.5× and at most 4× the PDF size, and no more than 6 megapixels.
-    const scale = Math.min(clamp(1600 / areaWidth, 1.5, 4), Math.sqrt(6_000_000 / (areaWidth * areaHeight)));
-    const viewport = page.getViewport({ scale });
+  /** Renders the parts of an area at one scale and stacks them top to bottom into one PNG. */
+  private async renderAreaImage(pdfDocument: PDFDocumentProxy, pieces: AreaPiece[]): Promise<ArrayBuffer> {
+    const parts = await Promise.all(pieces.map(async piece => {
+      const page = await pdfDocument.getPage(piece.page);
+      const base = page.getViewport({ scale: 1 });
+      return { piece, page, width: Math.max(1, piece.rect.width * base.width), height: Math.max(1, piece.rect.height * base.height) };
+    }));
+    const areaWidth = Math.max(...parts.map(part => part.width));
+    const areaHeight = parts.reduce((total, part) => total + part.height, 0);
+    // About 1600px wide, at least 1.5× and at most 4× the PDF size, and no more than 8 megapixels.
+    const scale = Math.min(clamp(1600 / areaWidth, 1.5, 4), Math.sqrt(8_000_000 / (areaWidth * areaHeight)));
+    // PDF.js paints its whole canvas white first, so each part gets its own canvas.
+    const bands: HTMLCanvasElement[] = [];
+    for (const { piece, page, width, height } of parts) {
+      const viewport = page.getViewport({ scale });
+      const band = createEl("canvas");
+      band.width = Math.max(1, Math.round(width * scale));
+      band.height = Math.max(1, Math.round(height * scale));
+      const bandContext = band.getContext("2d");
+      if (!bandContext) throw new Error("Canvas is unavailable");
+      await page.render({
+        canvasContext: bandContext,
+        viewport,
+        transform: [1, 0, 0, 1, -piece.rect.x * viewport.width, -piece.rect.y * viewport.height],
+      }).promise;
+      bands.push(band);
+    }
+    if (bands.length === 1) return this.canvasPng(bands[0]);
     const canvas = createEl("canvas");
-    canvas.width = Math.max(1, Math.round(rect.width * viewport.width));
-    canvas.height = Math.max(1, Math.round(rect.height * viewport.height));
+    canvas.width = Math.max(...bands.map(band => band.width));
+    canvas.height = bands.reduce((total, band) => total + band.height, 0);
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas is unavailable");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({
-      canvasContext: context,
-      viewport,
-      transform: [1, 0, 0, 1, -rect.x * viewport.width, -rect.y * viewport.height],
-    }).promise;
+    let top = 0;
+    for (const band of bands) {
+      context.drawImage(band, 0, top);
+      top += band.height;
+    }
+    return this.canvasPng(canvas);
+  }
+
+  private async canvasPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
     const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("Could not encode the picture");
     return blob.arrayBuffer();
