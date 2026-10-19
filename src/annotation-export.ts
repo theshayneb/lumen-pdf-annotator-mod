@@ -289,6 +289,17 @@ export async function sidecarPath(vault: Vault, pdf: TFile): Promise<string> {
   throw new SidecarConflictError(sidecarCandidate(pdf, 1));
 }
 
+/** This PDF's sidecar if one has been exported (and not deleted), else null. */
+export async function existingSidecarPath(vault: Vault, pdf: TFile): Promise<string | null> {
+  for (let attempt = 1; attempt <= 100; attempt++) {
+    const path = sidecarCandidate(pdf, attempt);
+    const existing = vault.getAbstractFileByPath(path);
+    if (!existing) return null;
+    if (existing instanceof TFile && sidecarOwner(await vault.cachedRead(existing)) === pdf.path) return path;
+  }
+  return null;
+}
+
 /**
  * Write `<pdf name>.md` in the vault root. Existing notes are overwritten only
  * when they are this PDF's sidecar, and text the user added below the end

@@ -15,7 +15,7 @@ interface LumenSettings {
   legacyAnnotationFolder: string;
   automaticPdfBackups: boolean;
   sidecarGrouping: SidecarGrouping;
-  sidecarAutoSync: boolean;
+  sidecarAutoUpdate: boolean;
 }
 
 const DEFAULT_SETTINGS: LumenSettings = {
@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS: LumenSettings = {
   legacyAnnotationFolder: "PDF annotations",
   automaticPdfBackups: false,
   sidecarGrouping: "color",
-  sidecarAutoSync: false,
+  sidecarAutoUpdate: true,
 };
 
 function isPdfTheme(value: unknown): value is PdfTheme {
@@ -52,7 +52,7 @@ function readSettings(value: unknown): LumenSettings {
     legacyAnnotationFolder: typeof stored.legacyAnnotationFolder === "string" ? stored.legacyAnnotationFolder : DEFAULT_SETTINGS.legacyAnnotationFolder,
     automaticPdfBackups: typeof stored.automaticPdfBackups === "boolean" ? stored.automaticPdfBackups : DEFAULT_SETTINGS.automaticPdfBackups,
     sidecarGrouping: isSidecarGrouping(stored.sidecarGrouping) ? stored.sidecarGrouping : DEFAULT_SETTINGS.sidecarGrouping,
-    sidecarAutoSync: typeof stored.sidecarAutoSync === "boolean" ? stored.sidecarAutoSync : DEFAULT_SETTINGS.sidecarAutoSync,
+    sidecarAutoUpdate: typeof stored.sidecarAutoUpdate === "boolean" ? stored.sidecarAutoUpdate : DEFAULT_SETTINGS.sidecarAutoUpdate,
   };
 }
 
@@ -88,7 +88,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.legacyAnnotationFolder,
       this.settings.automaticPdfBackups,
       () => this.viewState.attach(leaf),
-      () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoSync }),
+      () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoUpdate }),
       () => this.settings.interfaceTheme,
       () => this.settings.openAnnotationsPanel,
     ));
@@ -342,9 +342,9 @@ class LumenSettingTab extends PluginSettingTab {
         control: { type: "dropdown", key: "sidecarGrouping", options: { color: "By highlight color", page: "By page" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
       },
       {
-        name: "Keep sidecar notes up to date",
-        desc: "Rewrite the sidecar note automatically a moment after each annotation change. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept.",
-        control: { type: "toggle", key: "sidecarAutoSync", defaultValue: DEFAULT_SETTINGS.sidecarAutoSync },
+        name: "Keep exported sidecar notes up to date",
+        desc: "Once a PDF's sidecar note has been exported, rewrite it automatically a moment after each annotation change, using the heading order you chose. PDFs without a sidecar are left alone. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept.",
+        control: { type: "toggle", key: "sidecarAutoUpdate", defaultValue: DEFAULT_SETTINGS.sidecarAutoUpdate },
       },
       {
         name: "Export annotations",
@@ -364,7 +364,7 @@ class LumenSettingTab extends PluginSettingTab {
     if (key === "legacyAnnotationFolder") return this.plugin.settings.legacyAnnotationFolder;
     if (key === "automaticPdfBackups") return this.plugin.settings.automaticPdfBackups;
     if (key === "sidecarGrouping") return this.plugin.settings.sidecarGrouping;
-    if (key === "sidecarAutoSync") return this.plugin.settings.sidecarAutoSync;
+    if (key === "sidecarAutoUpdate") return this.plugin.settings.sidecarAutoUpdate;
     return undefined;
   }
 
@@ -393,8 +393,8 @@ class LumenSettingTab extends PluginSettingTab {
       this.plugin.settings.sidecarGrouping = value;
       return this.plugin.saveSettings();
     }
-    if (key === "sidecarAutoSync" && typeof value === "boolean") {
-      this.plugin.settings.sidecarAutoSync = value;
+    if (key === "sidecarAutoUpdate" && typeof value === "boolean") {
+      this.plugin.settings.sidecarAutoUpdate = value;
       return this.plugin.saveSettings();
     }
   }

@@ -15,7 +15,7 @@ import {
   ResolvedOutlineEntry,
   resolvePdfOutline,
 } from "./outline";
-import { SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
+import { existingSidecarPath, SidecarConflictError, SidecarGrouping, writeSidecar } from "./annotation-export";
 import { areaImagePath, DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
@@ -726,8 +726,10 @@ export class LumenPdfView extends FileView {
     this.sidecarTimer = window.setTimeout(() => void this.syncSidecar(), SIDECAR_SYNC_DELAY);
   }
 
+  /** Rewrites the sidecar after a change, but only once it has been exported. */
   private async syncSidecar(): Promise<void> {
     try {
+      if (!this.bundleFile || !(await existingSidecarPath(this.app.vault, this.bundleFile))) return;
       await this.exportSidecar();
     } catch (error) {
       if (error instanceof SidecarConflictError) {

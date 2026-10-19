@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.30 — 2026-10-19
+
+- Exported sidecar notes now update automatically after each annotation change, on by default (**Keep exported sidecar notes up to date**). Only PDFs whose sidecar you have exported are updated, so no new notes appear on their own, and the heading order you chose is kept.
+
 ## 1.0.29 — 2026-10-19
 
 - Area pictures are saved in the vault's `Attachments/` folder as `pdf-area-<id>.png`. Pictures saved by 1.0.27–1.0.28 in `Utilities/PDF Annotator/images/` are moved there once when the plugin loads (links to them are updated), and the old folder is removed when empty.
