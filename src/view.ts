@@ -1,4 +1,4 @@
-import { FileView, Menu, Modal, Notice, Platform, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, FuzzySuggestModal, Menu, Modal, Notice, Platform, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import type { PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { TextLayer } from "pdfjs-dist/types/src/display/text_layer";
 import { annotationMarkdownLink } from "./links";
@@ -16,7 +16,8 @@ import {
   resolvePdfOutline,
 } from "./outline";
 import { existingSidecarPath, SidecarConflictError, SidecarGrouping, SidecarLookup, writeSidecar } from "./annotation-export";
-import { areaImagePath, DocumentBundle, LegacyAnnotationRecord, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
+import { AnnotationBundleInfo, AnnotationRepository, areaImagePath, DocumentBundle, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
+import { compactText, locateQuote } from "./version-match";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
 export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
@@ -3962,6 +3963,177 @@ export class LumenPdfView extends FileView {
     return records;
   }
 
+  /** Lets the user pick another annotated PDF (an earlier version of this one) and copies its annotations here. */
+  async chooseVersionToCopy(): Promise<void> {
+    if (!this.bundle || !this.bundleFile) return;
+    const current = this.bundle.hash;
+    const file = this.bundleFile;
+    const bundles = (await listAnnotationBundles(this.app.vault)).filter(item => item.hash !== current);
+    if (!bundles.length) {
+      new Notice("No other annotated PDFs were found.");
+      return;
+    }
+    // Likely earlier versions first: the same name, then names sharing the most words.
+    const words = (name: string) => new Set(name.toLowerCase().replace(/\.pdf$/, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    const mine = words(file.name);
+    const similarity = (item: AnnotationBundleInfo) => {
+      if (item.manifest.workingPath === file.path || item.manifest.originalName === file.name) return 1000;
+      let shared = 0;
+      for (const word of words(item.manifest.originalName)) if (mine.has(word)) shared++;
+      return shared;
+    };
+    bundles.sort((a, b) => similarity(b) - similarity(a) || b.manifest.updatedAt.localeCompare(a.manifest.updatedAt));
+    new VersionPickerModal(this, bundles, item => {
+      void this.copyAnnotationsFromVersion(item).catch(error => {
+        console.error("Could not copy annotations from the other version", error);
+        new Notice(`Could not copy annotations: ${error instanceof Error ? error.message : String(error)}`, 8000);
+      });
+    }).open();
+  }
+
+  /**
+   * Copies another version's annotations onto this PDF. Text highlights are
+   * found again by their wording (nearest to their old page); areas and page
+   * notes keep their place on the same page. Highlights whose text is not in
+   * this version become page notes holding the old text, so nothing is lost.
+   */
+  private async copyAnnotationsFromVersion(source: AnnotationBundleInfo): Promise<void> {
+    if (!this.bundle || !this.pdfDocument) return;
+    const bundle = this.bundle;
+    const pdfDocument = this.pdfDocument;
+    const generation = this.documentGeneration;
+    const progress = new Notice("Matching annotations to this version…", 0);
+    try {
+      const repository = new AnnotationRepository(this.app.vault, source.folder, source.hash, source.manifest.workingPath);
+      const old = await repository.load();
+      const [names, order, extras] = await Promise.all([repository.loadColorNames(), repository.loadColorOrder(), repository.loadExtraColors()]);
+      const document = await this.buildQuoteDocumentIndex(pdfDocument, generation);
+      if (generation !== this.documentGeneration || bundle !== this.bundle) return;
+      const compact = compactText(document);
+      const pageCount = pdfDocument.numPages;
+      const existing = new Set(this.index.logicalAll().map(item => this.versionCopyKey(item)));
+      const created: PdfAnnotation[] = [];
+      const areas: Array<{ id: string; pieces: AreaPiece[] }> = [];
+      let copied = 0;
+      let unmatched = 0;
+      let skipped = 0;
+      const now = Date.now();
+      const keep = (anchor: PdfAnnotation, page: number, rects: NormalizedRect[], extra: Partial<PdfAnnotation> = {}): PdfAnnotation => ({
+        ...anchor, id: crypto.randomUUID(), groupId: undefined, page, rects, updatedAt: now, tags: anchor.tags.slice(), ...extra,
+      });
+      for (const anchor of old.logicalAll()) {
+        if (existing.has(this.versionCopyKey(anchor))) {
+          skipped++;
+          continue;
+        }
+        const members = old.inGroup(anchor.id).sort((a, b) => a.page - b.page || (a.rects[0]?.y ?? 0) - (b.rects[0]?.y ?? 0));
+        const note = members.find(item => item.note.trim())?.note ?? anchor.note;
+        const tags = members.find(item => item.tags.length)?.tags ?? anchor.tags;
+        const base = { ...anchor, note, tags };
+        if (anchor.kind === "page-note" || anchor.kind === "area") {
+          // Same place on the same page; a page that no longer exists makes it unmatched.
+          if (members.some(item => item.page > pageCount)) {
+            created.push(this.unmatchedNote(base, Math.min(anchor.page, pageCount), anchor.kind === "area" ? "this area's page" : "this note's page", now));
+            unmatched++;
+            continue;
+          }
+          const parts = members.map(item => keep(base, item.page, item.rects.map(rect => ({ ...rect }))));
+          for (const part of parts.slice(1)) part.groupId = parts[0].id;
+          created.push(...parts);
+          if (anchor.kind === "area") areas.push({ id: parts[0].id, pieces: parts.map(part => ({ page: part.page, rect: part.rects[0] })) });
+          copied++;
+          continue;
+        }
+        // Text: find each distinct quote of the annotation (usually one, shared by all its pages).
+        const quotes: Array<{ quote: string; page: number; y: number }> = [];
+        for (const item of members) {
+          if (item.quote.trim() && !quotes.some(entry => entry.quote === item.quote)) quotes.push({ quote: item.quote, page: item.page, y: item.rects[0]?.y ?? 0 });
+        }
+        const parts: PdfAnnotation[] = [];
+        const missing: string[] = [];
+        for (const entry of quotes) {
+          const found = locateQuote(document, compact, entry.quote, entry.page, entry.y);
+          if (!found) {
+            missing.push(entry.quote);
+            continue;
+          }
+          for (const part of found) parts.push(keep(base, part.page, this.coalesceSelectionRects(part.rects), { quote: entry.quote }));
+        }
+        if (parts.length) {
+          for (const part of parts.slice(1)) part.groupId = parts[0].id;
+          created.push(...parts);
+          copied++;
+        }
+        if (missing.length || !parts.length) {
+          created.push(this.unmatchedNote({ ...base, quote: missing.join(" … ") || anchor.quote }, Math.min(anchor.page, pageCount), "this highlight", now));
+          unmatched++;
+        }
+        if (created.length % 200 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+      }
+      if (generation !== this.documentGeneration || bundle !== this.bundle) return;
+      // Area pictures are taken again from this version.
+      for (const area of areas) {
+        try {
+          await writeAreaImage(this.app.vault, area.id, await this.renderAreaImage(pdfDocument, area.pieces));
+        } catch (error) {
+          console.error("Could not save an area picture", error);
+        }
+      }
+      if (generation !== this.documentGeneration || bundle !== this.bundle) return;
+      for (const annotation of created) {
+        this.index.put(annotation);
+        bundle.repository.queue({ op: "put", annotation });
+      }
+      await this.mergeVersionColors(names, order, extras);
+      for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
+      this.refreshInspector();
+      const parts = [`Copied ${copied} annotation${copied === 1 ? "" : "s"} from ${source.manifest.originalName}.`];
+      if (unmatched) parts.push(`${unmatched} couldn't be matched and were kept as page notes tagged #unmatched.`);
+      if (skipped) parts.push(`${skipped} were already here and were skipped.`);
+      new Notice(parts.join(" "), 10000);
+    } finally {
+      progress.hide();
+    }
+  }
+
+  /** Identifies an annotation's content, so copying the same version twice adds nothing new. */
+  private versionCopyKey(item: PdfAnnotation): string {
+    return `${item.color}\u0000${item.createdAt}\u0000${item.quote.replace(/\s+/g, " ").trim()}`;
+  }
+
+  /** A page note standing in for an annotation that could not be placed in this version. */
+  private unmatchedNote(old: PdfAnnotation, page: number, what: string, now: number): PdfAnnotation {
+    const y = clamp(old.rects[0]?.y ?? 0.05, 0, 0.95);
+    const quote = old.kind === "text" ? old.quote.replace(/\s+/g, " ").trim() : "";
+    const lines = [`Not found in this version (${what}).`];
+    if (quote) lines.push(`Highlighted: "${quote}"`);
+    if (old.note.trim()) lines.push("", old.note.trim());
+    const note = newPageNote(page, 0.01, y, old.color);
+    // Same createdAt and quote as the original, so copying again skips it.
+    return { ...note, quote: old.quote, note: lines.join("\n"), tags: Array.from(new Set([...old.tags, "unmatched"])), createdAt: old.createdAt, updatedAt: now };
+  }
+
+  /** Adds the other version's color names, order and added colors where this PDF has none of its own. */
+  private async mergeVersionColors(names: ColorNames, order: string[], extras: string[]): Promise<void> {
+    if (!this.bundle) return;
+    const mergedNames = { ...names, ...this.colorNames };
+    const mergedExtras = Array.from(new Set([...this.extraColors, ...extras])).slice(0, MAX_EXTRA_COLORS);
+    const mergedOrder = this.colorOrder.length ? this.colorOrder : order;
+    if (Object.keys(mergedNames).length !== Object.keys(this.colorNames).length) {
+      this.colorNames = mergedNames;
+      this.colorNamesVersion++;
+      await this.bundle.repository.saveColorNames(mergedNames);
+    }
+    if (mergedExtras.length !== this.extraColors.length) {
+      this.extraColors = mergedExtras;
+      await this.bundle.repository.saveExtraColors(mergedExtras);
+    }
+    if (mergedOrder !== this.colorOrder) {
+      this.colorOrder = mergedOrder;
+      await this.bundle.repository.saveColorOrder(mergedOrder);
+    }
+  }
+
   private async buildQuoteDocumentIndex(pdfDocument: PDFDocumentProxy, expectedGeneration: number): Promise<QuoteDocumentIndex> {
     let text = "";
     const pages: QuotePageIndex[] = [];
@@ -4187,6 +4359,23 @@ function renderLookupResult(container: HTMLElement, result: LookupResult): void 
   } else {
     container.createDiv({ cls: "lumod-lookup-status", text: "No definition found." });
   }
+}
+
+/** Picks the annotated PDF (usually an earlier version of this one) to copy annotations from. */
+class VersionPickerModal extends FuzzySuggestModal<AnnotationBundleInfo> {
+  constructor(view: LumenPdfView, private readonly bundles: AnnotationBundleInfo[], private readonly onChoose: (item: AnnotationBundleInfo) => void) {
+    super(view.app);
+    this.setPlaceholder("Copy annotations from which PDF?");
+  }
+
+  getItems(): AnnotationBundleInfo[] { return this.bundles; }
+
+  getItemText(item: AnnotationBundleInfo): string {
+    const date = item.manifest.updatedAt.slice(0, 10);
+    return `${item.manifest.originalName} — ${item.manifest.workingPath}${date ? ` (last opened ${date})` : ""}`;
+  }
+
+  onChooseItem(item: AnnotationBundleInfo): void { this.onChoose(item); }
 }
 
 class ColorNamesModal extends Modal {

@@ -118,6 +118,7 @@ export default class LumenPdfPlugin extends Plugin {
     this.addReaderCommand("reset-pdf-zoom", "Reset PDF zoom", view => view.resetZoom());
     this.addReaderCommand("place-page-note", "Place a page note", view => view.togglePageNotePlacement());
     this.addReaderCommand("capture-area", "Capture an area (image or table)", view => view.toggleAreaMode());
+    this.addReaderCommand("copy-annotations-from-version", "Copy annotations from another version of this PDF", view => view.chooseVersionToCopy());
     this.addReaderCommand("checkpoint-annotations", "Save an annotation checkpoint", async view => {
       await view.checkpointAnnotations();
       new Notice("Annotation checkpoint saved.");

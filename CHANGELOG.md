@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.32 — 2026-10-28
+
+- New command **Copy annotations from another version of this PDF**. Pick an earlier annotated version; text highlights are matched again by their wording (ignoring spacing and case, nearest to their old page), areas and page notes keep their place, area pictures are retaken, and color names, added colors and heading order are carried over. Highlights that can't be found become page notes tagged `#unmatched` holding the old text and note. Copying twice adds no duplicates; the old version is untouched.
+
 ## 1.0.31 — 2026-10-19
 
 - Fixed sidecar notes not updating (automatically or on export) when Obsidian had shortened the `Related` link to just the PDF's name, when the note had been moved out of the vault root, or when the `%% lumen-sidecar-end %%` line had been deleted. The plugin now finds the sidecar through the notes that link to the PDF and resolves the link the way Obsidian does.
