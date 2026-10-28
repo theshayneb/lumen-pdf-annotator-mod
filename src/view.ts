@@ -539,6 +539,7 @@ export class LumenPdfView extends FileView {
     this.groupSplitHighlights();
     bundle.repository.onChange = () => this.scheduleSidecarSync();
     this.refreshSidecarButton();
+    if (!index.size) void this.warnIfContentsChanged(file, bundle.hash, generation);
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
     this.refreshInspector();
     // On phones the panel covers the page, so it stays closed there.
@@ -4014,6 +4015,29 @@ export class LumenPdfView extends FileView {
       if (records.length % 50 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
     }
     return records;
+  }
+
+  /**
+   * Annotations belong to a PDF's exact contents. When a file at this path had
+   * annotations under different contents (it was replaced, re-downloaded or
+   * damaged), say so, since the panel would otherwise just look empty.
+   */
+  private async warnIfContentsChanged(file: TFile, hash: string, generation: number): Promise<void> {
+    try {
+      const earlier = (await listAnnotationBundles(this.app.vault))
+        .filter(item => item.hash !== hash && item.manifest.workingPath === file.path);
+      if (!earlier.length || generation !== this.documentGeneration || this.index.size) return;
+      const backup = await this.app.vault.adapter.exists(`${earlier[0].folder}/document.pdf`);
+      new Notice(
+        `${file.name} has changed since it was annotated, so its annotations aren't shown. They are still saved. `
+        + "If this is a new version, run \"Copy annotations from another version of this PDF\". "
+        + "If the file is damaged (blank pages), put back a good copy and they will reappear"
+        + (backup ? ", or use \"Restore a backed-up PDF\"." : "."),
+        0,
+      );
+    } catch (error) {
+      console.error("Could not check for earlier annotations", error);
+    }
   }
 
   /** Lets the user pick another annotated PDF (an earlier version of this one) and copies its annotations here. */

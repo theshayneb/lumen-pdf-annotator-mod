@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.35 — 2026-10-28
+
+- When a PDF opens with no annotations but the same file had annotations before under different contents (it was replaced, re-downloaded, or damaged by a sync), a message now says so and how to get them back, instead of the panel just looking empty.
+
 ## 1.0.34 — 2026-10-28
 
 - If a PDF or its annotations can't be loaded, a message now says what went wrong instead of leaving a blank page and an empty Annotations panel. Annotations are never written when they failed to load.
