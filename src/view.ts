@@ -438,14 +438,14 @@ export class LumenPdfView extends FileView {
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("lumod-host");
-    if (!this.mobileRuntime) return;
-    const doc = this.containerEl.ownerDocument;
-    const viewWindow = doc.defaultView;
     for (const name of ["create", "delete", "rename"] as const) {
       this.registerEvent(this.app.vault.on(name as "create", file => {
         if (file instanceof TFile && file.extension === "md") this.refreshSidecarButton();
       }));
     }
+    if (!this.mobileRuntime) return;
+    const doc = this.containerEl.ownerDocument;
+    const viewWindow = doc.defaultView;
     this.registerDomEvent(doc, "selectionchange", () => this.scheduleMobileSelectionCapture());
     this.registerDomEvent(doc, "visibilitychange", () => this.handleMobileVisibilityChange());
     this.registerDomEvent(doc, "pointerdown", event => {
@@ -479,6 +479,19 @@ export class LumenPdfView extends FileView {
 
   async onLoadFile(file: TFile): Promise<void> {
     const generation = ++this.documentGeneration;
+    try {
+      await this.loadFileContents(file, generation);
+    } catch (error) {
+      // Say what failed instead of leaving a blank page. Annotations are not
+      // touched: the annotation store is only attached after it loaded.
+      console.error(`Could not open ${file.path}`, error);
+      if (generation === this.documentGeneration) {
+        new Notice(`Could not open ${file.name}: ${error instanceof Error ? error.message : String(error)}`, 15000);
+      }
+    }
+  }
+
+  private async loadFileContents(file: TFile, generation: number): Promise<void> {
     await this.teardownDocument(false);
     if (generation !== this.documentGeneration) return;
     const bytes = await this.app.vault.readBinary(file);
@@ -486,6 +499,8 @@ export class LumenPdfView extends FileView {
     const bundle = await openBundle(this.app.vault, file, bytes, this.automaticPdfBackups);
     if (generation !== this.documentGeneration) return;
     const indexPromise = bundle.repository.load();
+    // Awaited below; this only keeps an early failure from being reported as unhandled.
+    indexPromise.catch(() => undefined);
     const loaded = await loadPdf(bytes, this.mobileRuntime);
     if (generation !== this.documentGeneration) {
       try { await loaded.document?.destroy?.(); } catch { /* a newer document owns the view */ }

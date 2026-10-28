@@ -2,6 +2,11 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.34 — 2026-10-28
+
+- If a PDF or its annotations can't be loaded, a message now says what went wrong instead of leaving a blank page and an empty Annotations panel. Annotations are never written when they failed to load.
+- The **Open sidecar note** button now also updates on desktop when the sidecar note is created, moved or deleted.
+
 ## 1.0.33 — 2026-10-28
 
 - The Annotations panel shows an **Open sidecar note** button next to the export button once the PDF has a sidecar note. It opens the note, or switches to it if it's already open, and appears or disappears as the note is created, moved or deleted.
