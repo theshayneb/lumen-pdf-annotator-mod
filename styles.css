@@ -389,6 +389,9 @@
 .lumod-panel-header > .lumod-icon-button.lumod-sidecar-button {
   margin-left: 0;
 }
+.lumod-panel-header > .lumod-icon-button.lumod-sidecar-button[hidden] {
+  display: none;
+}
 .lumod-count {
   margin-left: auto;
   padding: 2px 7px;

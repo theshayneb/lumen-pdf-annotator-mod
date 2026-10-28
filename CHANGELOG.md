@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.33 — 2026-10-28
+
+- The Annotations panel shows an **Open sidecar note** button next to the export button once the PDF has a sidecar note. It opens the note, or switches to it if it's already open, and appears or disappears as the note is created, moved or deleted.
+
 ## 1.0.32 — 2026-10-28
 
 - New command **Copy annotations from another version of this PDF**. Pick an earlier annotated version; text highlights are matched again by their wording (ignoring spacing and case, nearest to their old page), areas and page notes keep their place, area pictures are retaken, and color names, added colors and heading order are carried over. Highlights that can't be found become page notes tagged `#unmatched` holding the old text and note. Copying twice adds no duplicates; the old version is untouched.

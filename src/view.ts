@@ -347,6 +347,8 @@ export class LumenPdfView extends FileView {
   private pageNotePlacement = false;
   private pageNoteButton: HTMLButtonElement | null = null;
   private areaMode = false;
+  private sidecarOpenButton: HTMLButtonElement | null = null;
+  private sidecarCheckTimer = 0;
   private areaButton: HTMLButtonElement | null = null;
   private areaDraft: AreaDraft | null = null;
   private readonly pageTextCache = new Map<number, SearchPageData>();
@@ -439,6 +441,11 @@ export class LumenPdfView extends FileView {
     if (!this.mobileRuntime) return;
     const doc = this.containerEl.ownerDocument;
     const viewWindow = doc.defaultView;
+    for (const name of ["create", "delete", "rename"] as const) {
+      this.registerEvent(this.app.vault.on(name as "create", file => {
+        if (file instanceof TFile && file.extension === "md") this.refreshSidecarButton();
+      }));
+    }
     this.registerDomEvent(doc, "selectionchange", () => this.scheduleMobileSelectionCapture());
     this.registerDomEvent(doc, "visibilitychange", () => this.handleMobileVisibilityChange());
     this.registerDomEvent(doc, "pointerdown", event => {
@@ -516,6 +523,7 @@ export class LumenPdfView extends FileView {
     this.sidecarConflictReported = false;
     this.groupSplitHighlights();
     bundle.repository.onChange = () => this.scheduleSidecarSync();
+    this.refreshSidecarButton();
     for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
     this.refreshInspector();
     // On phones the panel covers the page, so it stays closed there.
@@ -672,7 +680,32 @@ export class LumenPdfView extends FileView {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;
     if (!this.bundle || !this.bundleFile) return null;
-    return writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder, this.sidecarLookup());
+    const path = await writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder, this.sidecarLookup());
+    this.refreshSidecarButton();
+    return path;
+  }
+
+  /** Shows the "Open sidecar note" button only while this PDF has a sidecar. */
+  private refreshSidecarButton(): void {
+    window.clearTimeout(this.sidecarCheckTimer);
+    this.sidecarCheckTimer = window.setTimeout(() => {
+      const file = this.bundleFile;
+      const button = this.sidecarOpenButton;
+      if (!file || !button) return;
+      void existingSidecarPath(this.app.vault, file, this.sidecarLookup()).then(path => {
+        if (file === this.bundleFile) button.hidden = !path;
+      }).catch(error => console.error("Could not look for the sidecar note", error));
+    }, 300);
+  }
+
+  private async openExistingSidecar(): Promise<void> {
+    if (!this.bundleFile) return;
+    const path = await existingSidecarPath(this.app.vault, this.bundleFile, this.sidecarLookup());
+    if (path) await this.openSidecar(path);
+    else {
+      new Notice("This PDF has no sidecar note yet. Use the export button to create one.");
+      this.refreshSidecarButton();
+    }
   }
 
   /** Lets the sidecar be found after it is moved or its PDF link is shortened. */
@@ -1206,6 +1239,11 @@ export class LumenPdfView extends FileView {
     const header = this.inspector.createDiv({ cls: "lumod-panel-header" });
     header.createSpan({ text: "Annotations" });
     this.annotationCount = header.createSpan({ cls: "lumod-count", text: "0" });
+    // Shown only once this PDF has a sidecar note.
+    this.sidecarOpenButton = iconButton("file-text", "Open sidecar note", () => void this.openExistingSidecar());
+    this.sidecarOpenButton.addClass("lumod-sidecar-button");
+    this.sidecarOpenButton.hidden = true;
+    header.append(this.sidecarOpenButton);
     const sidecarButton = iconButton("file-down", "Export to sidecar Markdown note", () => this.chooseSidecarExport());
     sidecarButton.addClass("lumod-sidecar-button");
     header.append(sidecarButton);
@@ -4324,6 +4362,7 @@ export class LumenPdfView extends FileView {
     this.workerPort = null;
     this.bundle = null;
     this.bundleFile = null;
+    if (this.sidecarOpenButton) this.sidecarOpenButton.hidden = true;
     this.colorNames = {};
     this.colorOrder = [];
     this.extraColors = [];
