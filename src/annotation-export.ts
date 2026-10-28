@@ -4,11 +4,11 @@ import { annotationUri } from "./links";
 import { colorName, hasCustomColorName, orderColors } from "./model";
 import type { ColorNames } from "./model";
 import type { AnnotationIndex, PdfAnnotation } from "./model";
-import { areaImagePath } from "./storage";
+import { areaImageName } from "./storage";
 
 /** An embed of an area annotation's saved picture. */
 function areaEmbed(annotation: PdfAnnotation): string {
-  return `![[${areaImagePath(annotation.groupId || annotation.id)}]]`;
+  return `![[${areaImageName(annotation.groupId || annotation.id)}]]`;
 }
 
 export type SidecarGrouping = "page" | "color";

@@ -16,7 +16,7 @@ import {
   resolvePdfOutline,
 } from "./outline";
 import { existingSidecarPath, SidecarConflictError, SidecarGrouping, SidecarLookup, writeSidecar } from "./annotation-export";
-import { AnnotationBundleInfo, AnnotationRepository, areaImagePath, DocumentBundle, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle, writeAreaImage } from "./storage";
+import { AnnotationBundleInfo, AnnotationRepository, areaImageName, DocumentBundle, ensureFolder, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle } from "./storage";
 import { compactText, locateQuote } from "./version-match";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
 
@@ -3037,7 +3037,7 @@ export class LumenPdfView extends FileView {
     tags.addEventListener("change", saveTags);
     const actions = container.createDiv({ cls: "lumod-editor-actions" });
     if (annotation.kind === "area") {
-      actions.append(iconButton("copy", "Copy image embed", () => void this.writeClipboard(`![[${areaImagePath(annotation.groupId || annotation.id)}]]`)));
+      actions.append(iconButton("copy", "Copy image embed", () => void this.writeClipboard(`![[${areaImageName(annotation.groupId || annotation.id)}]]`)));
     } else actions.append(iconButton("copy", "Copy quoted text", () => void this.writeClipboard(annotation.quote)));
     if (annotation.kind === "text") {
       actions.append(iconButton("scan-text", "Extend annotation", () => this.beginExtension(annotation)));
@@ -3085,7 +3085,7 @@ export class LumenPdfView extends FileView {
       this.bundle.repository.queue({ op: "remove", id: current.id, at: now });
       pages.add(current.page);
       if (current.kind === "area" && !current.groupId) {
-        const image = this.app.vault.getAbstractFileByPath(areaImagePath(current.id));
+        const image = this.areaImageFile(current.id);
         if (image) void this.app.fileManager.trashFile(image);
       }
     }
@@ -3562,7 +3562,32 @@ export class LumenPdfView extends FileView {
 
   /** The picture of an area belongs to its first part, so every part of a multi-page area shows the same picture. */
   private areaImageSrc(annotation: PdfAnnotation): string {
-    return this.app.vault.adapter.getResourcePath(areaImagePath(annotation.groupId || annotation.id));
+    const file = this.areaImageFile(annotation.groupId || annotation.id);
+    return file ? this.app.vault.getResourcePath(file) : "";
+  }
+
+  /** An area's picture, found by its file name wherever it is in the vault. */
+  private areaImageFile(id: string): TFile | null {
+    return this.app.metadataCache.getFirstLinkpathDest(areaImageName(id), this.bundleFile?.path ?? "");
+  }
+
+  /**
+   * Saves an area's picture: over the existing file if there is one, else
+   * where Obsidian's "Default location for new attachments" setting puts
+   * attachments of this PDF's sidecar note (or of the PDF, before it has one).
+   */
+  private async saveAreaImage(id: string, data: ArrayBuffer): Promise<void> {
+    const existing = this.areaImageFile(id);
+    if (existing) {
+      await this.app.vault.modifyBinary(existing, data);
+      return;
+    }
+    const pdf = this.bundleFile;
+    const source = (pdf ? await existingSidecarPath(this.app.vault, pdf, this.sidecarLookup()) : null) ?? pdf?.path ?? "";
+    const path = await this.app.fileManager.getAvailablePathForAttachment(areaImageName(id), source);
+    const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (folder) await ensureFolder(this.app.vault, folder);
+    await this.app.vault.createBinary(path, data);
   }
 
   /** The page under a screen point, with the point in that page's 0–1 coordinates; gaps count as the nearest page. */
@@ -3758,7 +3783,7 @@ export class LumenPdfView extends FileView {
     for (const part of parts.slice(1)) part.groupId = first.id;
     try {
       const image = await this.renderAreaImage(this.pdfDocument, pieces);
-      await writeAreaImage(this.app.vault, first.id, image);
+      await this.saveAreaImage(first.id, image);
     } catch (error) {
       console.error("Could not save the area picture", error);
       new Notice("Could not save a picture of the area. The area is still marked.", 6000);
@@ -4159,7 +4184,7 @@ export class LumenPdfView extends FileView {
       // Area pictures are taken again from this version.
       for (const area of areas) {
         try {
-          await writeAreaImage(this.app.vault, area.id, await this.renderAreaImage(pdfDocument, area.pieces));
+          await this.saveAreaImage(area.id, await this.renderAreaImage(pdfDocument, area.pieces));
         } catch (error) {
           console.error("Could not save an area picture", error);
         }

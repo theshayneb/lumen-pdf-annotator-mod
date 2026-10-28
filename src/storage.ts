@@ -123,14 +123,21 @@ async function documentHash(vault: Vault, file: TFile, bytes: ArrayBuffer): Prom
   return hash;
 }
 
-/** Pictures of area annotations go in the vault's attachments folder. */
-export const AREA_IMAGE_FOLDER = "Attachments";
+/** Where 1.0.29–1.0.37 saved pictures of area annotations. Newer ones follow Obsidian's attachment setting. */
+const AREA_IMAGE_FOLDER = "Attachments";
 // 1.0.27–1.0.28 kept them in the plugin's own folder.
 const PREVIOUS_AREA_IMAGE_FOLDER = `${STORAGE_FOLDER}/images`;
 
-/** Where the picture of an area annotation is saved. */
-export function areaImagePath(id: string): string {
-  return `${AREA_IMAGE_FOLDER}/pdf-area-${id}.png`;
+/**
+ * The file name of an area annotation's picture. Pictures are found by this
+ * name wherever they are in the vault, so they can be moved freely.
+ */
+export function areaImageName(id: string): string {
+  return `pdf-area-${id}.png`;
+}
+
+function areaImagePath(id: string): string {
+  return `${AREA_IMAGE_FOLDER}/${areaImageName(id)}`;
 }
 
 /**
@@ -151,17 +158,7 @@ export async function migrateAreaImages(vault: Vault, rename: (file: TFile, path
   await removeIfEmpty(vault, PREVIOUS_AREA_IMAGE_FOLDER);
 }
 
-/** Saves the picture of an area annotation, replacing any earlier one. */
-export async function writeAreaImage(vault: Vault, id: string, data: ArrayBuffer): Promise<string> {
-  const path = areaImagePath(id);
-  await ensureFolder(vault, path.slice(0, path.lastIndexOf("/")));
-  const existing = vault.getAbstractFileByPath(path);
-  if (existing instanceof TFile) await vault.modifyBinary(existing, data);
-  else await vault.createBinary(path, data);
-  return path;
-}
-
-async function ensureFolder(vault: Vault, path: string): Promise<void> {
+export async function ensureFolder(vault: Vault, path: string): Promise<void> {
   let current = "";
   for (const part of normalizePath(path).split("/")) {
     current = current ? `${current}/${part}` : part;

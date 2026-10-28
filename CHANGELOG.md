@@ -2,6 +2,11 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.38 — 2026-10-28
+
+- Area pictures now follow Obsidian's **Default location for new attachments** setting, relative to the PDF's sidecar note (or the PDF itself before it has a sidecar), instead of always going to `Attachments/`.
+- Pictures are found by file name wherever they are, so moving them in the vault no longer breaks them; the sidecar embeds them as `![[pdf-area-….png]]`.
+
 ## 1.0.37 — 2026-10-28
 
 - The "has changed since it was annotated" message now says when the PDF file was last modified, to help find what changed it.
