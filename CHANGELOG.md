@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.37 — 2026-10-28
+
+- The "has changed since it was annotated" message now says when the PDF file was last modified, to help find what changed it.
+
 ## 1.0.36 — 2026-10-28
 
 - An existing sidecar note can be moved to a new version of its PDF: put the new PDF first in the note's `Related` property (the old one can stay after it). The note keeps its name, so links to it keep working.

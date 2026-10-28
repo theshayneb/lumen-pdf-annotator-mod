@@ -4037,7 +4037,7 @@ export class LumenPdfView extends FileView {
       if (!earlier.length || generation !== this.documentGeneration || this.index.size) return;
       const backup = await this.app.vault.adapter.exists(`${earlier[0].folder}/document.pdf`);
       new Notice(
-        `${file.name} has changed since it was annotated, so its annotations aren't shown. They are still saved. `
+        `${file.name} has changed since it was annotated (the file was last modified ${new Date(file.stat.mtime).toLocaleString()}), so its annotations aren't shown. They are still saved. `
         + "If this is a new version, run \"Copy annotations from another version of this PDF\". "
         + "If the file is damaged (blank pages), put back a good copy and they will reappear"
         + (backup ? ", or use \"Restore a backed-up PDF\"." : "."),
