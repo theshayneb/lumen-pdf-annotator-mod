@@ -728,9 +728,17 @@ export class LumenPdfView extends FileView {
   private sidecarLookup(): SidecarLookup {
     const cache = this.app.metadataCache;
     return {
-      linkedFrom: pdf => Object.entries(cache.resolvedLinks)
-        .filter(([source, targets]) => source.endsWith(".md") && targets[pdf.path])
-        .map(([source]) => source),
+      linkedFrom: pdf => {
+        const sources = new Set(Object.entries(cache.resolvedLinks)
+          .filter(([source, targets]) => source.endsWith(".md") && targets[pdf.path])
+          .map(([source]) => source));
+        // Links in properties, in case the link index leaves them out.
+        for (const note of this.app.vault.getMarkdownFiles()) {
+          const links = cache.getFileCache(note)?.frontmatterLinks;
+          if (links?.some(link => cache.getFirstLinkpathDest(link.link, note.path)?.path === pdf.path)) sources.add(note.path);
+        }
+        return Array.from(sources);
+      },
       resolve: (link, sourcePath) => cache.getFirstLinkpathDest(link, sourcePath),
     };
   }

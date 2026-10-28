@@ -329,6 +329,19 @@ export async function existingSidecarPath(vault: Vault, pdf: TFile, lookup?: Sid
   return (await findSidecar(vault, pdf, lookup)).path;
 }
 
+/**
+ * The generated note, but with the note's own properties when they already
+ * name this PDF in `Related`: extra `Related` links (such as an earlier
+ * version) and properties the user added are kept. Older sidecars get the
+ * generated properties.
+ */
+function keptProperties(content: string, generated: string): string {
+  const existing = content.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  const fresh = generated.match(/^---\n[\s\S]*?\n---\n/);
+  if (!existing || !fresh || relatedLinkTarget(existing[1]) === null) return generated;
+  return `---\n${existing[1].replace(/\r\n/g, "\n")}\n---\n${generated.slice(fresh[0].length)}`;
+}
+
 /** Text the user wrote below the end marker, which a re-export keeps. */
 function keptText(content: string): string {
   const start = content.indexOf(SIDECAR_END_PREFIX);
@@ -354,7 +367,7 @@ export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIn
       const named = (existing.parent?.isRoot() ?? true) && /^(.*?)(?: \d+)?$/.exec(existing.basename)?.[1] === pdf.basename;
       if (!ownsPdf(content, path, pdf, lookup, named || content.includes(SIDECAR_END_PREFIX))) return content;
       changed = true;
-      return generated + keptText(content);
+      return keptProperties(content, generated) + keptText(content);
     });
     if (!changed) throw new Error(`${path} no longer looks like this PDF's sidecar, so it was left unchanged.`);
   } else if (existing) {

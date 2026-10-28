@@ -2,6 +2,12 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.36 — 2026-10-28
+
+- An existing sidecar note can be moved to a new version of its PDF: put the new PDF first in the note's `Related` property (the old one can stay after it). The note keeps its name, so links to it keep working.
+- Rewriting a sidecar now keeps its properties (extra `Related` links, tags, aliases, anything you added) instead of replacing them.
+- Sidecars are also found through links in their properties even when Obsidian's link index leaves those out.
+
 ## 1.0.35 — 2026-10-28
 
 - When a PDF opens with no annotations but the same file had annotations before under different contents (it was replaced, re-downloaded, or damaged by a sync), a message now says so and how to get them back, instead of the panel just looking empty.
