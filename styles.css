@@ -2270,3 +2270,9 @@
     min-height: 44px;
   }
 }
+/* Shown on older underlines, boxes and so on, to turn them into a plain highlight. */
+.lumod-make-highlight {
+  align-self: flex-start;
+  margin: 6px 0;
+  font-size: 12px;
+}

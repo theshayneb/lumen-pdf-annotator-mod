@@ -193,11 +193,7 @@ function errorName(error: unknown): string | undefined {
     : undefined;
 }
 
-/** The styles offered when marking text, in toolbar order. */
-const SELECTION_STYLES = [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const;
-
-/** The style and color last used to mark text, offered first next time (in every PDF). */
-let lastSelectionStyle: MarkStyle = "highlight";
+/** The color last used to highlight text, used by tag and note next time (in every PDF). */
 let lastSelectionColor: string = MARK_COLORS[0];
 
 function iconButton(icon: string, label: string, onClick: () => void): HTMLButtonElement {
@@ -2446,38 +2442,22 @@ export class LumenPdfView extends FileView {
     // text in it; tag and note mark it in the last color used, then ask.
     const palette_ = this.paletteColors();
     const color = palette_.includes(lastSelectionColor) ? lastSelectionColor : palette_[0] ?? MARK_COLORS[0];
-    const styles = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
-    const styleButtons: HTMLButtonElement[] = [];
-    for (const [style, icon] of SELECTION_STYLES) {
-      const button = iconButton(icon, markLabel(style), () => {
-        lastSelectionStyle = style;
-        for (const item of styleButtons) {
-          const active = item === button;
-          item.classList.toggle("is-active", active);
-          item.setAttribute("aria-pressed", String(active));
-        }
-      });
-      button.classList.toggle("is-active", style === lastSelectionStyle);
-      button.setAttribute("aria-pressed", String(style === lastSelectionStyle));
-      styleButtons.push(button);
-      styles.append(button);
-    }
     const colors = palette.createDiv({ cls: "lumod-color-row" });
     for (const value of palette_) {
-      const label = `${colorName(value, this.colorNames)} ${markLabel(lastSelectionStyle).toLowerCase()}`;
-      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Mark in ${colorName(value, this.colorNames)}`, title: label } });
+      const label = `Highlight in ${colorName(value, this.colorNames)}`;
+      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": label, title: label } });
       chip.dataset.color = value;
       chip.style.setProperty("--mark-color", value);
       chip.classList.toggle("is-active", value === color);
       chip.addEventListener("click", event => {
         event.stopPropagation();
         lastSelectionColor = value;
-        this.commitSelection(lastSelectionStyle, value, lastSelectionStyle === "comment");
+        this.commitSelection("highlight", value, false);
       });
     }
     const actions = palette.createDiv({ cls: "lumod-palette-actions" });
-    actions.append(iconButton("tag", "Highlight and add tags", () => this.commitAndEdit(lastSelectionStyle, color, ".lumod-tags-input")));
-    actions.append(iconButton("notebook-pen", "Highlight and add note", () => this.commitAndEdit(lastSelectionStyle, color, ".lumod-note-input")));
+    actions.append(iconButton("tag", "Highlight and add tags", () => this.commitAndEdit("highlight", color, ".lumod-tags-input")));
+    actions.append(iconButton("notebook-pen", "Highlight and add note", () => this.commitAndEdit("highlight", color, ".lumod-note-input")));
     actions.append(iconButton("copy", "Copy selected text", () => {
       void this.writeClipboard(pendingSelection.quote);
       this.closeSelectionPalette();
@@ -3077,16 +3057,13 @@ export class LumenPdfView extends FileView {
         colors.querySelectorAll(".lumod-color-chip").forEach(item => item.classList.toggle("is-active", item === chip));
       });
     }
-    if (annotation.kind === "text") {
-      const styles = container.createDiv({ cls: "lumod-style-row" });
-      for (const [style, icon] of [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const) {
-        const button = iconButton(icon, markLabel(style), () => {
-          this.mutateAnnotation(annotation.id, { style });
-          styles.querySelectorAll(".lumod-icon-button").forEach(item => item.classList.toggle("is-active", item === button));
-        });
-        button.classList.toggle("is-active", annotation.style === style);
-        styles.append(button);
-      }
+    // New marks are always highlights; older underlines, boxes and so on can be turned into one.
+    if (annotation.kind === "text" && annotation.style !== "highlight") {
+      const change = container.createEl("button", { cls: "lumod-make-highlight", text: `Change this ${markLabel(annotation.style).toLowerCase()} to a highlight` });
+      change.addEventListener("click", () => {
+        this.mutateAnnotation(annotation.id, { style: "highlight" });
+        change.remove();
+      });
     }
     if (annotation.kind === "area") {
       const preview = container.createDiv({ cls: "lumod-editor-area" });
