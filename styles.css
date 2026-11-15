@@ -1890,10 +1890,10 @@
   height: 44px;
   border-radius: 10px;
 }
+/* Tag, note, copy, define and close get their own row on phones. */
 .lumod-selection-palette.is-mobile-surface .lumod-palette-actions {
-  position: absolute;
-  right: 8px;
-  top: 7px;
+  justify-content: center;
+  width: 100%;
 }
 .lumod-extension-palette.is-mobile-surface {
   width: calc(100vw - 16px);
@@ -1994,9 +1994,6 @@
   .lumod-reader.is-mobile .lumod-zoom-group {
     padding-left: 0;
     border-left: 0;
-  }
-  .lumod-selection-palette.is-mobile-surface .lumod-color-row {
-    padding-right: 44px;
   }
   .lumod-selection-palette.is-mobile-surface .lumod-selection-styles {
     width: 176px;

@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.42 — 2026-11-15
+
+- **Selection toolbar matches ePub Reader's**, in the same order: styles (the one you pick is remembered), then colors (tap one to mark the text in it straight away), then **tag** and **note** (new: mark in the color you used last, then put the cursor in the tags or note field), copy, define or translate, and **close** (new). Before, you picked a color and then tapped a style. On phones the action buttons get their own row.
+
 ## 1.0.41 — 2026-11-15
 
 - The palette, color names, added colors and the **Highlight colors** window now come from a file shared with ePub Reader (`highlight-colors.ts`), so both plugins offer the same colors and the same window. Nothing changes for your PDFs: the colors, names and added colors you have stay as they are.

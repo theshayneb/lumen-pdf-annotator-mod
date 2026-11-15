@@ -192,6 +192,13 @@ function errorName(error: unknown): string | undefined {
     : undefined;
 }
 
+/** The styles offered when marking text, in toolbar order. */
+const SELECTION_STYLES = [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const;
+
+/** The style and color last used to mark text, offered first next time (in every PDF). */
+let lastSelectionStyle: MarkStyle = "highlight";
+let lastSelectionColor: string = MARK_COLORS[0];
+
 function iconButton(icon: string, label: string, onClick: () => void): HTMLButtonElement {
   const button = createEl("button");
   button.className = "lumod-icon-button";
@@ -2455,40 +2462,50 @@ export class LumenPdfView extends FileView {
       palette.setAttribute("aria-label", "PDF annotation tools");
     }
     this.selectionPalette = palette;
-    let pendingColor: string = MARK_COLORS[0];
-    const colorChips: HTMLButtonElement[] = [];
-    const colors = palette.createDiv({ cls: "lumod-color-row" });
-    for (const color of this.paletteColors()) {
-      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Choose ${colorName(color, this.colorNames)}` } });
-      chip.dataset.color = color;
-      chip.style.setProperty("--mark-color", color);
-      chip.classList.toggle("is-active", color === pendingColor);
-      chip.setAttribute("aria-pressed", String(color === pendingColor));
-      chip.addEventListener("click", event => {
-        event.stopPropagation();
-        pendingColor = color;
-        for (const item of colorChips) {
-          const active = item === chip;
+    // The same toolbar as ePub Reader's: pick a style, tap a color to mark the
+    // text in it; tag and note mark it in the last color used, then ask.
+    const palette_ = this.paletteColors();
+    const color = palette_.includes(lastSelectionColor) ? lastSelectionColor : palette_[0] ?? MARK_COLORS[0];
+    const styles = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
+    const styleButtons: HTMLButtonElement[] = [];
+    for (const [style, icon] of SELECTION_STYLES) {
+      const button = iconButton(icon, markLabel(style), () => {
+        lastSelectionStyle = style;
+        for (const item of styleButtons) {
+          const active = item === button;
           item.classList.toggle("is-active", active);
           item.setAttribute("aria-pressed", String(active));
         }
       });
-      colorChips.push(chip);
+      button.classList.toggle("is-active", style === lastSelectionStyle);
+      button.setAttribute("aria-pressed", String(style === lastSelectionStyle));
+      styleButtons.push(button);
+      styles.append(button);
     }
-    const styles = palette.createDiv({ cls: "lumod-style-row lumod-selection-styles" });
-    for (const [style, icon] of [["highlight", "highlighter"], ["underline", "underline"], ["dashed", "minus"], ["dotted", "ellipsis"], ["strike", "strikethrough"], ["box", "square"], ["comment", "message-square"]] as const) {
-      styles.append(iconButton(icon, `Apply ${markLabel(style)}`, () => {
-        this.commitSelection(style, pendingColor, style === "comment");
-      }));
+    const colors = palette.createDiv({ cls: "lumod-color-row" });
+    for (const value of palette_) {
+      const label = `${colorName(value, this.colorNames)} ${markLabel(lastSelectionStyle).toLowerCase()}`;
+      const chip = colors.createEl("button", { cls: "lumod-color-chip", attr: { "aria-label": `Mark in ${colorName(value, this.colorNames)}`, title: label } });
+      chip.dataset.color = value;
+      chip.style.setProperty("--mark-color", value);
+      chip.classList.toggle("is-active", value === color);
+      chip.addEventListener("click", event => {
+        event.stopPropagation();
+        lastSelectionColor = value;
+        this.commitSelection(lastSelectionStyle, value, lastSelectionStyle === "comment");
+      });
     }
     const actions = palette.createDiv({ cls: "lumod-palette-actions" });
+    actions.append(iconButton("tag", "Highlight and add tags", () => this.commitAndEdit(lastSelectionStyle, color, ".lumod-tags-input")));
+    actions.append(iconButton("notebook-pen", "Highlight and add note", () => this.commitAndEdit(lastSelectionStyle, color, ".lumod-note-input")));
     actions.append(iconButton("copy", "Copy selected text", () => {
       void this.writeClipboard(pendingSelection.quote);
       this.closeSelectionPalette();
     }));
     actions.append(iconButton("book-a", "Define or translate", () => {
-      void this.lookUpSelection(pendingSelection, pendingColor);
+      void this.lookUpSelection(pendingSelection, color);
     }));
+    actions.append(iconButton("x", "Cancel", () => this.closeSelectionPalette()));
     if (this.mobileRuntime) return;
     const width = palette.offsetWidth || 390;
     palette.style.left = `${clamp(pendingSelection.x - width / 2, 12, window.innerWidth - width - 12)}px`;
@@ -2601,6 +2618,12 @@ export class LumenPdfView extends FileView {
   private finishExtension(): void {
     this.extensionGroupId = null;
     this.rootEl?.classList.remove("is-extending-annotation");
+  }
+
+  /** Marks the selection, opens its editor and puts the cursor in the field `selector` names (tags or note). */
+  private commitAndEdit(style: MarkStyle, color: string, selector: string): void {
+    if (!this.commitSelection(style, color, true)) return;
+    window.setTimeout(() => this.editor?.querySelector<HTMLElement>(selector)?.focus(), 0);
   }
 
   private commitSelection(style: MarkStyle, color: string, openEditor: boolean, extra?: Pick<PdfAnnotation, "note" | "tags">): PdfAnnotation | null {
