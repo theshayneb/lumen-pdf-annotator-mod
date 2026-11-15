@@ -293,6 +293,19 @@
   height: 16px;
   stroke-width: 1.8;
 }
+/* Obsidian gives buttons padding on mobile and tablets (more specific than
+   .lumod-icon-button), which squeezed the icons down to dots. Icons never
+   shrink, and these buttons never take padding. */
+.lumod-icon-button:not(#lumod-specificity) {
+  flex-shrink: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+.lumod-icon-button:not(#lumod-specificity) svg {
+  flex-shrink: 0;
+  min-width: 16px;
+  min-height: 16px;
+}
 .lumod-page-input {
   width: 44px;
   height: 28px;
@@ -1644,9 +1657,11 @@
   min-width: 44px;
   border-radius: 10px;
 }
-.lumod-reader.is-mobile .lumod-toolbar .lumod-icon-button svg {
-  width: 18px;
-  height: 18px;
+.lumod-reader.is-mobile .lumod-toolbar:not(#lumod-specificity) .lumod-icon-button svg {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
 }
 .lumod-reader.is-mobile .lumod-page-indicator {
   min-width: 88px;

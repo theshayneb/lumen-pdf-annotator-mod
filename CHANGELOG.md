@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.39 — 2026-11-15
+
+- Fixed toolbar icons shrinking to dots on Android tablets (and anywhere Obsidian adds padding to buttons): plugin buttons no longer take that padding and their icons can't be squeezed. Toolbar icons on touch screens are also a little bigger (20px).
+
 ## 1.0.38 — 2026-10-28
 
 - Area pictures now follow Obsidian's **Default location for new attachments** setting, relative to the PDF's sidecar note (or the PDF itself before it has a sidecar), instead of always going to `Attachments/`.
