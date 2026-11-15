@@ -2438,7 +2438,7 @@ export class LumenPdfView extends FileView {
     const pendingSelection = this.selection;
     this.selectionPalette?.remove();
     this.selectionPalette = null;
-    const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette" });
+    const palette = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-text-palette" });
     this.prepareDetachedSurface(palette);
     if (this.mobileRuntime) {
       palette.setAttribute("role", "toolbar");
@@ -2469,10 +2469,16 @@ export class LumenPdfView extends FileView {
       void this.writeClipboard(pendingSelection.quote);
       this.closeSelectionPalette();
     }));
-    actions.append(iconButton("book-a", "Define or translate", () => {
-      void this.lookUpSelection(pendingSelection, color);
+    actions.append(iconButton("book-a", "Define", () => {
+      void this.lookUpSelection(pendingSelection, color, "define");
     }));
-    actions.append(iconButton("x", "Cancel", () => this.closeSelectionPalette()));
+    actions.append(iconButton("languages", "Translate", () => {
+      void this.lookUpSelection(pendingSelection, color, "translate");
+    }));
+    // Close stands out (red, bold); on phones and tablets it sits to the right of both rows.
+    const close = iconButton("x", "Close", () => this.closeSelectionPalette());
+    close.addClass("lumod-palette-close");
+    palette.append(close);
     if (this.mobileRuntime) return;
     const width = palette.offsetWidth || 390;
     palette.style.left = `${clamp(pendingSelection.x - width / 2, 12, window.innerWidth - width - 12)}px`;
@@ -2624,7 +2630,8 @@ export class LumenPdfView extends FileView {
    * shows the result in place of the selection toolbar. The selection is kept
    * so the result can be saved as a highlight with the result as its note.
    */
-  private async lookUpSelection(pending: PendingSelection, color: string): Promise<void> {
+  /** "define" looks the word up (other languages are translated into English); "translate" asks for a language. */
+  private async lookUpSelection(pending: PendingSelection, color: string, mode: "define" | "translate" = "define"): Promise<void> {
     this.closeLookupPanel();
     this.closeSelectionPalette();
     if (!this.rootEl) return;
@@ -2643,6 +2650,10 @@ export class LumenPdfView extends FileView {
       },
     });
     this.lookupPanel = panel;
+    if (mode === "translate") {
+      panel.translate(pending.quote);
+      return;
+    }
     try {
       const result = await lookUpSelection(pending.quote);
       if (panel.isOpen) panel.showResult(result);
@@ -3794,6 +3805,7 @@ export class LumenPdfView extends FileView {
     actions.append(iconButton("crop", "Save area", () => void this.commitArea(pieces, pendingColor, false)));
     actions.append(iconButton("message-square", "Save area and add a note", () => void this.commitArea(pieces, pendingColor, true)));
     actions.append(iconButton("x", "Cancel", () => this.closeSelectionPalette()));
+    actions.lastElementChild?.addClass("lumod-palette-close");
     if (this.mobileRuntime) return;
     const width = palette.offsetWidth || 300;
     palette.style.left = `${clamp(clientX - width / 2, 12, window.innerWidth - width - 12)}px`;

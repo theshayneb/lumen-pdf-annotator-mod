@@ -2302,6 +2302,20 @@
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
+.lu-language {
+  margin: 4px 0 8px;
+}
+.lu-language-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.lu-language-select {
+  flex: 1;
+  min-width: 0;
+}
 /* The panel's buttons look the same whatever button styles each plugin has. */
 .lu-panel .lu-actions button:not(#lu-specificity) {
   height: auto;
@@ -2339,4 +2353,42 @@
     min-width: 44px;
     min-height: 44px;
   }
+}
+/* Close stands out on the selection toolbars: red and bold. */
+.lumod-selection-palette .lumod-palette-close:not(#lumod-specificity) {
+  border: 1.5px solid color-mix(in srgb, var(--text-error) 55%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-error) 12%, transparent);
+  color: var(--text-error);
+}
+.lumod-selection-palette .lumod-palette-close:not(#lumod-specificity):hover {
+  background: color-mix(in srgb, var(--text-error) 22%, transparent);
+}
+.lumod-selection-palette .lumod-palette-close svg {
+  stroke-width: 3;
+}
+.lumod-text-palette .lumod-palette-actions {
+  padding-left: 6px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+/* Phones and tablets: colors on one row, the actions on a second, close on the right of both. */
+.lumod-selection-palette.lumod-text-palette.is-mobile-surface {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "colors close" "actions close";
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+}
+.lumod-text-palette.is-mobile-surface .lumod-color-row {
+  grid-area: colors;
+}
+.lumod-text-palette.is-mobile-surface .lumod-palette-actions {
+  grid-area: actions;
+  padding-left: 0;
+  border-left: 0;
+}
+.lumod-text-palette.is-mobile-surface .lumod-palette-close {
+  grid-area: close;
+  align-self: center;
 }

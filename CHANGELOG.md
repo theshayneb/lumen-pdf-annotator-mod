@@ -2,6 +2,11 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.46 — 2026-11-15
+
+- New **Translate** button on the selection toolbar: translates the selection into a language you choose in the result panel (remembered, and shared with ePub Reader). The book button is now **Define**.
+- **Close** on the selection toolbars is red and bold. On phones and tablets the colors are one row and the actions a second, with close on the right of both.
+
 ## 1.0.45 — 2026-11-15
 
 - **Define or translate** shows its result in the same panel as ePub Reader (a file shared by both plugins): at the top centre of the reader instead of over the selection, with "Looking up…" straight away, any error inside the panel, and **Copy** and **Save as highlight** at the bottom. Escape closes it.
