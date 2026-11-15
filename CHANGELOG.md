@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.43 — 2026-11-15
+
+- **Annotations panel filters match ePub Reader's**, using a filter bar shared by both plugins: search, color chips with counts and your color names (and a **Colors** button for the Highlight colors window), then **tag** (new), **section** (new: the PDF's top-level table-of-contents headings, when it has one), notes (with or without, or page notes only), **date** (new: today, last 7 or 30 days) and sort (reading order, newest, oldest, by color). The All / Highlights / Notes tabs are folded into the notes menu.
+
 ## 1.0.42 — 2026-11-15
 
 - **Selection toolbar matches ePub Reader's**, in the same order: styles (the one you pick is remembered), then colors (tap one to mark the text in it straight away), then **tag** and **note** (new: mark in the color you used last, then put the cursor in the tags or note field), copy, define or translate, and **close** (new). Before, you picked a color and then tapped a style. On phones the action buttons get their own row.

@@ -18,6 +18,7 @@ import {
 import { existingSidecarPath, SidecarConflictError, SidecarLookup, sidecarLayout, writeSidecar } from "./annotation-export";
 import { chooseColorOrder, chooseNoteLayout, NoteLayout } from "./note-layout";
 import { HighlightColorsModal } from "./highlight-colors";
+import { AnnotationFilters, DEFAULT_FILTERS, FilterBar, isUnfiltered, matchesDate } from "./annotation-filters";
 import { AnnotationBundleInfo, AnnotationRepository, areaImageName, DocumentBundle, ensureFolder, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle } from "./storage";
 import { compactText, locateQuote } from "./version-match";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
@@ -304,7 +305,6 @@ export class LumenPdfView extends FileView {
   private themeButton: HTMLButtonElement | null = null;
   private inspector!: HTMLElement;
   private inspectorList!: HTMLElement;
-  private inspectorQuery!: HTMLInputElement;
   private annotationCount!: HTMLElement;
   private observer: IntersectionObserver | null = null;
   private readonly pages = new Map<number, PageState>();
@@ -318,11 +318,13 @@ export class LumenPdfView extends FileView {
   private baselineHeight = 984;
   private currentPage = 1;
   private theme: PdfTheme;
-  private activeFilter: "all" | "highlights" | "notes" = "all";
-  private activeColor = "all";
-  private inspectorSort: "newest" | "oldest" | "page" | "color" = "page";
-  private inspectorColorFilters!: HTMLElement;
-  private inspectorColorRevision = -1;
+  /** The Annotations panel's filters (shared with ePub Reader's highlights panel). */
+  private filters: AnnotationFilters = { ...DEFAULT_FILTERS };
+  private filterBar: FilterBar | null = null;
+  /** What the filter bar last showed, so it is rebuilt only when that changes. */
+  private filterBarKey = "";
+  /** Top-level outline headings by page, for the section filter. */
+  private outlineSections: Array<{ title: string; page: number }> = [];
   private sidecarTimer = 0;
   // Names for highlight colours in this PDF only, stored in its bundle.
   private colorNames: ColorNames = {};
@@ -1114,6 +1116,11 @@ export class LumenPdfView extends FileView {
       if (generation !== this.documentGeneration || document !== this.pdfDocument) return;
       this.outlineEntries = await resolvePdfOutline(document, source);
       if (generation !== this.documentGeneration || document !== this.pdfDocument) return;
+      this.outlineSections = this.outlineEntries
+        .filter(entry => entry.depth === 0 && entry.title.trim())
+        .map(entry => ({ title: entry.title.trim(), page: entry.pageNumber }))
+        .sort((a, b) => a.page - b.page);
+      this.refreshInspector();
       if (this.outlineButton) {
         this.outlineButton.hidden = this.outlineEntries.length === 0;
         const name = this.outlineButton.querySelector<HTMLElement>(".lumod-visually-hidden");
@@ -1343,55 +1350,23 @@ export class LumenPdfView extends FileView {
     sidecarButton.addClass("lumod-sidecar-button");
     header.append(sidecarButton);
     header.append(iconButton("x", "Close annotations", () => this.toggleInspector()));
-    const inputWrap = this.inspector.createDiv({ cls: "lumod-search-input-wrap" });
-    setIcon(inputWrap.createSpan(), "search");
-    this.inspectorQuery = inputWrap.createEl("input", { attr: { type: "search", placeholder: "Search annotations", "aria-label": "Search annotations" } });
+    this.filterBar = new FilterBar(this.inspector.createDiv({ cls: "lumod-inspector-filters" }), {
+      searchPlaceholder: "Search annotations",
+      onChange: filters => {
+        this.filters = filters;
+        this.refreshInspector();
+      },
+      onEditColors: () => this.openColorNamesModal(),
+    });
     if (this.mobileRuntime) {
-      this.inspectorQuery.addEventListener("focus", () => this.inspector.addClass("is-mobile-querying"));
-      this.inspectorQuery.addEventListener("blur", () => {
+      const query = this.filterBar.searchInput;
+      query.addEventListener("focus", () => this.inspector.addClass("is-mobile-querying"));
+      query.addEventListener("blur", () => {
         window.setTimeout(() => {
-          if (this.containerEl.ownerDocument.activeElement !== this.inspectorQuery) {
-            this.inspector.removeClass("is-mobile-querying");
-          }
+          if (this.containerEl.ownerDocument.activeElement !== query) this.inspector.removeClass("is-mobile-querying");
         }, 120);
       });
     }
-    let queryTimer = 0;
-    this.inspectorQuery.addEventListener("input", () => {
-      window.clearTimeout(queryTimer);
-      queryTimer = window.setTimeout(() => this.refreshInspector(), 120);
-    });
-    const filters = this.inspector.createDiv({ cls: "lumod-filter-row" });
-    const filterButtons: HTMLButtonElement[] = [];
-    for (const [value, label] of [["all", "All"], ["highlights", "Highlights"], ["notes", "Notes"]] as const) {
-      const button = filters.createEl("button", { text: label });
-      button.classList.toggle("is-active", value === "all");
-      button.addEventListener("click", () => {
-        this.activeFilter = value;
-        filterButtons.forEach(item => item.classList.toggle("is-active", item === button));
-        this.refreshInspector();
-      });
-      filterButtons.push(button);
-    }
-    const nameColors = filters.createEl("button", {
-      cls: "lumod-color-names-button",
-      attr: { "aria-label": "Name highlight colors for this PDF" },
-    });
-    setIcon(nameColors.createSpan({ cls: "lumod-color-names-icon" }), "tag");
-    nameColors.createSpan({ text: "Color names" });
-    nameColors.addEventListener("click", () => this.openColorNamesModal());
-    const options = this.inspector.createDiv({ cls: "lumod-inspector-options" });
-    this.inspectorColorFilters = options.createDiv({ cls: "lumod-inspector-colors", attr: { role: "group", "aria-label": "Filter annotations by color" } });
-    const sort = options.createEl("select", { cls: "lumod-inspector-sort", attr: { "aria-label": "Sort annotations" } });
-    sort.createEl("option", { value: "newest", text: "Newest" });
-    sort.createEl("option", { value: "oldest", text: "Oldest" });
-    sort.createEl("option", { value: "page", text: "Page" });
-    sort.createEl("option", { value: "color", text: "Color" });
-    sort.value = this.inspectorSort;
-    sort.addEventListener("change", () => {
-      this.inspectorSort = sort.value as typeof this.inspectorSort;
-      this.refreshInspector();
-    });
     this.inspectorList = this.inspector.createDiv({ cls: "lumod-inspector-list" });
     this.inspectorList.addEventListener("scroll", () => {
       window.cancelAnimationFrame(this.inspectorRaf);
@@ -1399,38 +1374,50 @@ export class LumenPdfView extends FileView {
     }, { passive: true });
   }
 
-  /** Colour chips with live counts: the palette, plus any imported colours in use. */
-  private renderInspectorColorFilters(): void {
-    if (!this.inspectorColorFilters || this.inspectorColorRevision === this.index.version) return;
-    this.inspectorColorRevision = this.index.version;
-    const counts = new Map<string, number>();
-    for (const item of this.index.logicalAll()) counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
-    const colors = this.knownColors(counts);
-    if (this.activeColor !== "all" && !colors.includes(this.activeColor)) this.activeColor = "all";
-    this.inspectorColorFilters.empty();
-    const allColors = this.inspectorColorFilters.createEl("button", { cls: "lumod-all-colors", text: "All", attr: { "aria-label": "Show all colors" } });
-    allColors.classList.toggle("is-active", this.activeColor === "all");
-    allColors.addEventListener("click", () => this.setInspectorColor("all"));
-    for (const color of colors) {
-      const count = counts.get(color) ?? 0;
-      const name = colorName(color, this.colorNames);
-      const button = this.inspectorColorFilters.createEl("button", {
-        cls: "lumod-color-filter",
-        attr: { "aria-label": `Show ${name} annotations (${count})`, title: `${name} · ${count}` },
-      });
-      button.style.setProperty("--mark-color", color);
-      button.classList.toggle("is-active", this.activeColor === color);
-      button.classList.toggle("is-empty", count === 0);
-      button.createSpan({ cls: "lumod-color-filter-swatch" });
-      if (hasCustomColorName(color, this.colorNames)) button.createSpan({ cls: "lumod-color-filter-name", text: name });
-      button.createSpan({ cls: "lumod-color-filter-count", text: String(count) });
-      button.addEventListener("click", () => this.setInspectorColor(this.activeColor === color ? "all" : color));
-      // Right-click (or long-press on touch devices) a chip to name the colours.
-      button.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        this.openColorNamesModal();
-      });
+  /** The section (top-level outline heading) a page belongs to, or "" when the PDF has no outline. */
+  private sectionForPage(page: number): string {
+    let title = "";
+    for (const section of this.outlineSections) {
+      if (section.page > page) break;
+      title = section.title;
     }
+    return title;
+  }
+
+  /** Refreshes the filter bar's chips (with live counts), tags and sections when any of them changed. */
+  private updateFilterBar(): void {
+    if (!this.filterBar) return;
+    const key = `${this.index.version}\u0000${this.colorNamesVersion}\u0000${this.outlineSections.length}\u0000${this.extraColors.join()}\u0000${JSON.stringify(this.filters)}`;
+    if (key === this.filterBarKey) return;
+    const counts = new Map<string, number>();
+    const tags = new Set<string>();
+    const sections = new Set<string>();
+    for (const item of this.index.logicalAll()) {
+      counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
+      for (const tag of item.tags) tags.add(tag);
+      if (this.outlineSections.length) {
+        const section = this.sectionForPage(item.page);
+        if (section) sections.add(section);
+      }
+    }
+    const colors = this.knownColors(counts);
+    // Drop filters whose color, tag or section no longer has any annotations.
+    const filters = { ...this.filters };
+    if (filters.color && !colors.includes(filters.color)) filters.color = "";
+    if (filters.tag && !tags.has(filters.tag)) filters.tag = "";
+    if (filters.section && !sections.has(filters.section)) filters.section = "";
+    if (JSON.stringify(filters) !== JSON.stringify(this.filters)) this.filters = filters;
+    this.filterBarKey = `${this.index.version}\u0000${this.colorNamesVersion}\u0000${this.outlineSections.length}\u0000${this.extraColors.join()}\u0000${JSON.stringify(this.filters)}`;
+    this.filterBar.update({
+      filters: this.filters,
+      colors: colors.map(value => ({ value, label: colorName(value, this.colorNames), count: counts.get(value) ?? 0, named: hasCustomColorName(value, this.colorNames) })),
+      tags: Array.from(tags).sort((a, b) => a.localeCompare(b)),
+      sections: this.outlineSections.map(section => section.title).filter((title, index, all) => sections.has(title) && all.indexOf(title) === index),
+      sectionWord: "sections",
+      pageNotes: true,
+      shown: this.inspectorItemCount(),
+      total: this.index.logicalSize,
+    });
   }
 
   /** The palette plus any other colours used in this PDF, in display order. */
@@ -1480,16 +1467,9 @@ export class LumenPdfView extends FileView {
     }
     this.colorNames = names;
     this.colorNamesVersion++;
-    this.inspectorColorRevision = -1;
+    this.filterBarKey = "";
     this.refreshInspector();
     this.scheduleSidecarSync();
-  }
-
-  private setInspectorColor(color: string): void {
-    this.activeColor = color;
-    this.inspectorColorRevision = -1;
-    this.renderInspectorColorFilters();
-    this.refreshInspector();
   }
 
   private async buildPages(generation: number): Promise<void> {
@@ -3189,34 +3169,34 @@ export class LumenPdfView extends FileView {
   }
 
   private filteredAnnotations(): PdfAnnotation[] {
-    const query = this.inspectorQuery?.value.trim().toLowerCase() ?? "";
-    const key = `${this.activeFilter}\u0000${this.activeColor}\u0000${this.inspectorSort}\u0000${this.colorNamesVersion}\u0000${query}`;
+    const filters = this.filters;
+    const query = filters.query.trim().toLowerCase();
+    const key = `${JSON.stringify(filters)}\u0000${this.colorNamesVersion}\u0000${this.outlineSections.length}`;
     if (this.inspectorCacheRevision === this.index.version && this.inspectorCacheKey === key) return this.inspectorCache;
     const all = this.index.logicalAll();
-    this.inspectorCache = this.activeFilter === "all" && this.activeColor === "all" && !query
+    this.inspectorCache = isUnfiltered(filters)
       ? all.slice()
       : all.filter(item => {
-        if (this.activeFilter === "highlights" && item.kind === "page-note") return false;
-        if (this.activeFilter === "notes" && !item.note) return false;
-        if (this.activeColor !== "all" && item.color !== this.activeColor) return false;
-        if (!query) return true;
-        return this.index.matches(item, query);
+        if (filters.color && item.color !== filters.color) return false;
+        if (filters.tag && !item.tags.includes(filters.tag)) return false;
+        if (filters.section && this.sectionForPage(item.page) !== filters.section) return false;
+        if (filters.note === "with-note" && !item.note.trim()) return false;
+        if (filters.note === "without-note" && item.note.trim()) return false;
+        if (filters.note === "page-notes" && item.kind !== "page-note") return false;
+        if (!matchesDate(item.createdAt, filters.date)) return false;
+        return !query || this.index.matches(item, query);
       });
-    if (this.inspectorSort === "newest") this.inspectorCache.reverse();
-    else if (this.inspectorSort === "page") this.inspectorCache.sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
-    else if (this.inspectorSort === "color") this.inspectorCache.sort((a, b) => compareColors(a.color, b.color, this.colorNames) || a.page - b.page || a.createdAt - b.createdAt);
+    const byPosition = (a: PdfAnnotation, b: PdfAnnotation) => a.page - b.page || (a.rects[0]?.y ?? 0) - (b.rects[0]?.y ?? 0) || a.createdAt - b.createdAt;
+    if (filters.sort === "newest") this.inspectorCache.reverse();
+    else if (filters.sort === "reading") this.inspectorCache.sort(byPosition);
+    else if (filters.sort === "color") this.inspectorCache.sort((a, b) => compareColors(a.color, b.color, this.colorNames) || byPosition(a, b));
     this.inspectorCacheRevision = this.index.version;
     this.inspectorCacheKey = key;
     return this.inspectorCache;
   }
 
   private usesDirectInspectorWindow(): boolean {
-    const query = this.inspectorQuery?.value.trim() ?? "";
-    return this.activeFilter === "all"
-      && this.activeColor === "all"
-      && this.inspectorSort !== "page"
-      && this.inspectorSort !== "color"
-      && !query;
+    return isUnfiltered(this.filters) && (this.filters.sort === "newest" || this.filters.sort === "oldest");
   }
 
   private inspectorItemCount(): number {
@@ -3227,12 +3207,12 @@ export class LumenPdfView extends FileView {
     if (!this.inspectorList) return;
     this.annotationCount.textContent = String(this.index.logicalSize);
     if (!this.inspector.classList.contains("is-open")) {
-      this.inspectorColorRevision = -1;
+      this.filterBarKey = "";
       this.inspectorList.empty();
       this.inspector.querySelector(".lumod-inspector-detail")?.remove();
       return;
     }
-    this.renderInspectorColorFilters();
+    this.updateFilterBar();
     if (!skipLayoutRead) {
       const virtualHeight = this.inspectorVirtualHeight(this.inspectorItemCount());
       this.inspectorList.scrollTop = Math.min(this.inspectorList.scrollTop, Math.max(0, virtualHeight - this.inspectorList.clientHeight));
@@ -3271,7 +3251,7 @@ export class LumenPdfView extends FileView {
     const start = Math.max(0, anchor - cardOverscan);
     const end = Math.min(itemCount, anchor + visibleCount + cardOverscan);
     const windowItems = directWindow
-      ? this.index.logicalSlice(start, end, this.inspectorSort === "newest")
+      ? this.index.logicalSlice(start, end, this.filters.sort === "newest")
       : filteredItems?.slice(start, end) ?? [];
     const spacer = this.inspectorList.createDiv({ cls: "lumod-virtual-spacer" });
     spacer.style.height = `${virtualHeight}px`;
@@ -4503,7 +4483,9 @@ export class LumenPdfView extends FileView {
     this.inspectorCache = [];
     this.inspectorCacheRevision = -1;
     this.inspectorCacheKey = "";
-    this.inspectorColorRevision = -1;
+    this.filterBarKey = "";
+    this.filters = { ...DEFAULT_FILTERS };
+    this.outlineSections = [];
     this.closeSelectionPalette();
     this.finishExtension();
     this.closeEditor();

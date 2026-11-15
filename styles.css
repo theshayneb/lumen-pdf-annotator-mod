@@ -569,26 +569,9 @@
   color: inherit;
   font-weight: 650;
 }
-.lumod-filter-row {
-  display: flex;
-  gap: 3px;
-  padding: 3px 10px 6px;
-  border-bottom: 1px solid var(--lumod-border);
-}
-.lumod-filter-row button {
-  height: 27px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--lumod-muted);
-  font-size: 11px;
-  box-shadow: none;
-}
-.lumod-filter-row button.is-active {
-  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
-  color: var(--interactive-accent);
-}
+
+
+
 .lumod-virtual-spacer {
   position: relative;
   width: 100%;
@@ -984,7 +967,6 @@
 .lumod-reader .lumod-icon-button.is-active,
 .lumod-selection-palette .lumod-icon-button.is-active,
 .lumod-mark-editor .lumod-icon-button.is-active,
-.lumod-filter-row button.is-active,
 .lumod-theme-switcher button.is-active {
   background-color: color-mix(in srgb, var(--interactive-accent) 11%, transparent);
   color: var(--interactive-accent);
@@ -993,7 +975,6 @@
 .lumod-icon-button.is-danger:hover {
   color: var(--text-error);
 }
-.lumod-filter-row button,
 .lumod-theme-switcher button {
   color: color-mix(in srgb, var(--interactive-accent) 76%, var(--text-muted));
 }
@@ -1086,99 +1067,26 @@
   height: 15px;
   stroke-width: 2;
 }
-.lumod-inspector-options {
-  display: flex;
-  align-items: center;
-  min-height: 34px;
-  gap: 7px;
-  padding: 4px 10px 6px;
-  border-bottom: 1px solid var(--lumod-border);
-}
-.lumod-inspector-colors {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-.lumod-inspector-colors .lumod-color-chip {
-  width: 12px;
-  height: 12px;
-  min-width: 12px;
-  border-radius: 4px;
-}
-.lumod-inspector-colors .lumod-color-chip.is-active {
-  outline-width: 1.5px;
-  outline-offset: 2px;
-}
-.lumod-inspector-colors {
-  flex-wrap: wrap;
-}
-.lumod-color-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 6px 0 5px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.lumod-color-filter-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 4px;
-  background: var(--mark-color);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
-}
-.lumod-color-filter-name {
-  max-width: 90px;
-  overflow: hidden;
-  color: var(--lumod-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lumod-filter-row > .lumod-color-names-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-}
-.lumod-color-names-icon {
-  display: inline-flex;
-}
-.lumod-color-names-icon svg {
-  width: 13px;
-  height: 13px;
-}
+
+
+
+
+
+
+
+
+
+
+
 .lumod-color-row {
   flex-wrap: wrap;
 }
-.lumod-color-filter-count {
-  color: var(--lumod-muted);
-}
-.lumod-color-filter.is-empty {
-  opacity: .45;
-}
-.lumod-reader:not(#lumod-specificity) .lumod-color-filter.is-active {
-  background: color-mix(in srgb, var(--mark-color) 22%, transparent);
-  box-shadow: inset 0 0 0 1.5px var(--mark-color);
-}
-.lumod-reader:not(#lumod-specificity) .lumod-color-filter.is-active .lumod-color-filter-count {
-  color: var(--lumod-text);
-}
-.lumod-reader.is-mobile .lumod-color-filter:not(#lumod-specificity) {
-  height: 40px;
-  padding: 0 9px;
-  gap: 5px;
-  font-size: 12px;
-}
-.lumod-reader.is-mobile .lumod-color-filter-swatch {
-  width: 16px;
-  height: 16px;
-}
+
+
+
+
+
+
 .lumod-card-tags {
   min-width: 0;
   overflow: hidden;
@@ -1191,33 +1099,10 @@
   margin-left: auto;
   color: var(--lumod-muted);
 }
-.lumod-all-colors {
-  height: 24px;
-  padding: 0 5px;
-  border-radius: 5px;
-  font-size: 10px;
-}
-.lumod-all-colors.is-active {
-  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-}
-.lumod-inspector-sort {
-  width: auto;
-  min-width: 76px;
-  height: 25px;
-  margin-left: auto;
-  padding: 0 20px 0 5px;
-  border: 0;
-  border-radius: 5px;
-  background-color: transparent;
-  box-shadow: none;
-  color: var(--interactive-accent);
-  font-size: 10px;
-}
-.lumod-inspector-sort:hover,
-.lumod-inspector-sort:focus {
-  background-color: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
-  box-shadow: none;
-}
+
+
+
+
 .lumod-reader,
 .lumod-selection-palette,
 .lumod-mark-editor {
@@ -1243,23 +1128,15 @@
 .lumod-reader .lumod-icon-button.is-active,
 .lumod-selection-palette .lumod-icon-button.is-active,
 .lumod-mark-editor .lumod-icon-button.is-active,
-.lumod-filter-row button.is-active,
-.lumod-theme-switcher button.is-active,
-.lumod-all-colors.is-active {
+.lumod-theme-switcher button.is-active {
   background-color: color-mix(in srgb, var(--lumod-accent) 11%, transparent);
   color: var(--lumod-accent);
 }
 .lumod-color-chip.is-active {
   outline-color: var(--lumod-accent);
 }
-.lumod-inspector-sort {
-  color: var(--lumod-muted);
-}
-.lumod-inspector-sort:hover,
-.lumod-inspector-sort:focus {
-  background-color: var(--background-modifier-hover);
-  color: var(--lumod-text);
-}
+
+
 .lumod-search-excerpt mark {
   background: color-mix(in srgb, var(--lumod-search-color) 34%, transparent);
 }
@@ -1464,7 +1341,6 @@
 .lumod-reader:not(#lumod-specificity) .lumod-icon-button.is-active,
 .lumod-selection-palette:not(#lumod-specificity) .lumod-icon-button.is-active,
 .lumod-mark-editor:not(#lumod-specificity) .lumod-icon-button.is-active,
-.lumod-filter-row:not(#lumod-specificity) button.is-active,
 .lumod-theme-switcher:not(#lumod-specificity) button.is-active {
   background-color: color-mix(in srgb, var(--interactive-accent) 11%, transparent);
 }
@@ -1476,12 +1352,8 @@
   width: 26px;
   height: 26px;
 }
-.lumod-all-colors:not(#lumod-specificity) {
-  padding: 0 5px;
-}
-.lumod-all-colors.is-active:not(#lumod-specificity) {
-  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-}
+
+
 .lumod-reader:not(#lumod-specificity) button,
 .lumod-selection-palette:not(#lumod-specificity) button,
 .lumod-mark-editor:not(#lumod-specificity) button {
@@ -1496,20 +1368,12 @@
 .lumod-reader:not(#lumod-specificity) .lumod-icon-button.is-active,
 .lumod-selection-palette:not(#lumod-specificity) .lumod-icon-button.is-active,
 .lumod-mark-editor:not(#lumod-specificity) .lumod-icon-button.is-active,
-.lumod-filter-row:not(#lumod-specificity) button.is-active,
-.lumod-theme-switcher:not(#lumod-specificity) button.is-active,
-.lumod-all-colors.is-active:not(#lumod-specificity) {
+.lumod-theme-switcher:not(#lumod-specificity) button.is-active {
   background-color: color-mix(in srgb, var(--lumod-accent) 11%, transparent);
   color: var(--lumod-accent);
 }
-.lumod-inspector-sort:not(#lumod-specificity) {
-  color: var(--lumod-muted);
-}
-.lumod-inspector-sort:not(#lumod-specificity):hover,
-.lumod-inspector-sort:not(#lumod-specificity):focus {
-  background-color: var(--background-modifier-hover);
-  color: var(--lumod-text);
-}
+
+
 .lumod-reader:not(#lumod-specificity) .lumod-color-chip:hover,
 .lumod-selection-palette:not(#lumod-specificity) .lumod-color-chip:hover,
 .lumod-mark-editor:not(#lumod-specificity) .lumod-color-chip:hover {
@@ -1649,10 +1513,7 @@
   right: calc(12px + env(safe-area-inset-right, 0px));
   left: calc(12px + env(safe-area-inset-left, 0px));
 }
-.lumod-reader.is-mobile.has-mobile-keyboard .lumod-inspector.is-mobile-querying .lumod-filter-row,
-.lumod-reader.is-mobile.has-mobile-keyboard .lumod-inspector.is-mobile-querying .lumod-inspector-options {
-  display: none;
-}
+
 .lumod-reader.is-mobile .lumod-panel-header {
   min-height: 50px;
   padding: 7px 8px 6px 16px;
@@ -1673,57 +1534,14 @@
   height: 42px;
   font-size: 16px;
 }
-.lumod-reader.is-mobile .lumod-filter-row {
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 3px 10px 7px;
-}
-.lumod-reader.is-mobile .lumod-filter-row button:not(#lumod-specificity) {
-  min-width: 44px;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: 9px;
-  font-size: 12px;
-}
-.lumod-reader.is-mobile .lumod-inspector-options {
-  min-height: 46px;
-  gap: 4px;
-  padding: 4px 8px 6px;
-}
-.lumod-reader.is-mobile .lumod-inspector-colors {
-  gap: 0;
-}
-.lumod-reader.is-mobile .lumod-inspector-colors .lumod-color-chip:not(#lumod-specificity),
-.lumod-reader.is-mobile .lumod-inspector-colors .lumod-all-colors:not(#lumod-specificity) {
-  position: relative;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  padding: 0;
-  outline: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.lumod-reader.is-mobile .lumod-inspector-colors .lumod-color-chip:after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: var(--mark-color);
-  transform: translate(-50%, -50%);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
-}
-.lumod-reader.is-mobile .lumod-inspector-colors .lumod-color-chip.is-active:after {
-  box-shadow: 0 0 0 2px var(--lumod-surface), 0 0 0 4px var(--lumod-accent);
-}
-.lumod-reader.is-mobile .lumod-inspector-sort {
-  min-width: 82px;
-  height: 36px;
-  font-size: 12px;
-}
+
+
+
+
+
+
+
+
 .lumod-reader.is-mobile .lumod-search-results,
 .lumod-reader.is-mobile .lumod-outline-list,
 .lumod-reader.is-mobile .lumod-inspector-list,
@@ -2010,20 +1828,9 @@
     flex-wrap: wrap;
     overflow: visible;
   }
-  .lumod-reader.is-mobile .lumod-inspector-options {
-    min-height: 94px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  .lumod-reader.is-mobile .lumod-inspector-colors {
-    flex: 1 0 100%;
-    justify-content: center;
-  }
-  .lumod-reader.is-mobile .lumod-inspector-sort {
-    height: 44px;
-    margin: 0 auto;
-    font-size: 16px;
-  }
+
+
+
 }
 @media (min-width: 600px) {
   .lumod-reader.is-mobile {
@@ -2338,6 +2145,128 @@
   .hl-colors-preset,
   .hl-colors-picker {
     min-width: 44px;
+    min-height: 44px;
+  }
+}
+/* The Annotations panel's filter bar area. */
+.lumod-inspector-filters {
+  padding: 4px 10px 0;
+  border-bottom: 1px solid var(--lumod-border);
+}
+
+/* Highlights panel filter bar, shared with ePub Reader (keep identical in both plugins). */
+.af-bar {
+  display: grid;
+  gap: var(--size-4-2, 8px);
+  padding: var(--size-4-2, 8px) 0;
+}
+.af-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.af-search-icon {
+  position: absolute;
+  inset-inline-start: var(--size-4-2, 8px);
+  display: inline-flex;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.af-search-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.af-search input {
+  width: 100%;
+  padding-inline-start: calc(var(--size-4-2, 8px) * 2 + 14px);
+}
+.af-color-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-2, 8px);
+}
+.af-colors {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--size-4-1, 4px);
+  min-width: 0;
+}
+.af-chip,
+.af-edit-colors {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-1, 4px);
+  height: 28px;
+  padding: 0 var(--size-4-2, 8px);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.af-chip:hover,
+.af-edit-colors:hover {
+  background: var(--background-modifier-hover);
+}
+.af-chip.is-active {
+  border-color: var(--af-color, var(--interactive-accent));
+  background: color-mix(in srgb, var(--af-color, var(--interactive-accent)) 22%, transparent);
+  color: var(--text-normal);
+}
+.af-chip.is-empty {
+  opacity: .5;
+}
+.af-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--af-color);
+}
+.af-chip-name {
+  max-width: 9em;
+  overflow: hidden;
+  color: var(--text-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.af-edit-colors {
+  flex: none;
+}
+.af-edit-colors-icon {
+  display: inline-flex;
+  color: var(--interactive-accent);
+}
+.af-edit-colors-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.af-menus {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--size-4-1, 4px);
+}
+.af-select {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+}
+.af-hidden {
+  display: none;
+}
+.af-count {
+  justify-self: end;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+@media (pointer: coarse) {
+  .af-chip,
+  .af-edit-colors,
+  .af-select {
     min-height: 44px;
   }
 }
