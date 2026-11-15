@@ -2208,6 +2208,24 @@
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
 }
+/* No outlines on the chips and the Colors button, whatever button styles each plugin has. */
+.af-bar .af-chip:not(#af-specificity),
+.af-bar .af-edit-colors:not(#af-specificity) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.af-bar .af-chip:not(#af-specificity):hover,
+.af-bar .af-edit-colors:not(#af-specificity):hover {
+  background: var(--background-modifier-hover);
+}
+.af-bar .af-chip.is-active:not(#af-specificity) {
+  background: color-mix(in srgb, var(--af-color, var(--interactive-accent)) 22%, transparent);
+  color: var(--text-normal);
+}
+.af-bar .af-edit-colors:not(#af-specificity) {
+  color: var(--interactive-accent);
+}
 @media (pointer: coarse) {
   .af-chip,
   .af-edit-colors,

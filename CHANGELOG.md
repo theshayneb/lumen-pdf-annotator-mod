@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.48 — 2026-11-15
+
+- The Annotations panel's color chips and Colors button keep their outline-free look in the filter bar shared with ePub Reader (which now looks the same).
+
 ## 1.0.47 — 2026-11-15
 
 - **An open PDF picks up changes from your other devices.** When vault sync brings in another device's changes to a PDF's annotations (colors, notes, tags, new or deleted highlights, color names), the open PDF reloads them within a couple of seconds, instead of keeping its old copy and possibly saving it back over the other device's changes. Changes you are making yourself are saved first.
