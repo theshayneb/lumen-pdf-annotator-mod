@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.45 — 2026-11-15
+
+- **Define or translate** shows its result in the same panel as ePub Reader (a file shared by both plugins): at the top centre of the reader instead of over the selection, with "Looking up…" straight away, any error inside the panel, and **Copy** and **Save as highlight** at the bottom. Escape closes it.
+
 ## 1.0.44 — 2026-11-15
 
 - **Highlights only.** The selection toolbar no longer offers underline, dashed, dotted, strikethrough, box or comment styles: tap a color to highlight, as in ePub Reader. Existing marks in those styles keep their look, and their editor has a button to turn them into a plain highlight.

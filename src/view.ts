@@ -21,7 +21,8 @@ import { HighlightColorsModal } from "./highlight-colors";
 import { AnnotationFilters, DEFAULT_FILTERS, FilterBar, isUnfiltered, matchesDate } from "./annotation-filters";
 import { AnnotationBundleInfo, AnnotationRepository, areaImageName, DocumentBundle, ensureFolder, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle } from "./storage";
 import { compactText, locateQuote } from "./version-match";
-import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
+import { lookUpSelection, lookupSummary, lookupTag } from "./word-lookup";
+import { LookupPanel } from "./lookup-panel";
 
 export const LUMEN_VIEW_TYPE = "lumen-pdf-mod-view";
 export type PdfTheme = "light" | "sepia" | "dark";
@@ -338,7 +339,7 @@ export class LumenPdfView extends FileView {
   private selection: PendingSelection | null = null;
   private selectionPalette: HTMLElement | null = null;
   private suppressNextSelectionCapture = false;
-  private lookupInFlight = 0;
+  private lookupPanel: LookupPanel | null = null;
   private extensionGroupId: string | null = null;
   private editor: HTMLElement | null = null;
   private searchGeneration = 0;
@@ -426,7 +427,8 @@ export class LumenPdfView extends FileView {
       return false;
     });
     if (this.mobileRuntime) this.scope.register([], "Escape", () => {
-      if (this.editor) this.closeEditor();
+      if (this.lookupPanel?.isOpen) this.closeLookupPanel();
+      else if (this.editor) this.closeEditor();
       else if (this.selectionPalette) this.closeSelectionPalette();
       else if (this.searchPanel?.classList.contains("is-open")) this.toggleSearch();
       else if (this.outlinePanel?.classList.contains("is-open")) this.toggleOutline();
@@ -998,6 +1000,11 @@ export class LumenPdfView extends FileView {
         this.pumpPageMounts();
       });
     }, { passive: true });
+    this.rootEl.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || !this.lookupPanel?.isOpen) return;
+      event.preventDefault();
+      this.closeLookupPanel();
+    });
     this.rootEl.addEventListener("pointerdown", event => {
       const target = event.target as Node;
       if (this.selectionPalette && !this.selectionPalette.contains(target)) {
@@ -2618,57 +2625,36 @@ export class LumenPdfView extends FileView {
    * so the result can be saved as a highlight with the result as its note.
    */
   private async lookUpSelection(pending: PendingSelection, color: string): Promise<void> {
-    const id = ++this.lookupInFlight;
-    const panel = this.showLookupPanel(pending);
-    const body = panel.createDiv({ cls: "lumod-lookup-body" });
-    body.createDiv({ cls: "lumod-lookup-status", text: "Looking up…" });
-    let result: LookupResult;
+    this.closeLookupPanel();
+    this.closeSelectionPalette();
+    if (!this.rootEl) return;
+    // The panel shared with ePub Reader: top centre of the reader, never over the selection.
+    const panel = new LookupPanel(this.rootEl, {
+      text: pending.quote,
+      onCopy: text => this.writeClipboard(text),
+      onSave: async result => {
+        this.selection = pending;
+        if (!this.commitSelection("highlight", color, false, { note: lookupSummary(result), tags: [lookupTag(result)] })) {
+          throw new Error("Could not highlight the selection.");
+        }
+      },
+      onClose: () => {
+        if (this.lookupPanel === panel) this.lookupPanel = null;
+      },
+    });
+    this.lookupPanel = panel;
     try {
-      result = await lookUpSelection(pending.quote);
+      const result = await lookUpSelection(pending.quote);
+      if (panel.isOpen) panel.showResult(result);
     } catch (error) {
-      if (id !== this.lookupInFlight || this.selectionPalette !== panel) return;
       console.error("Word lookup failed", error);
-      const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
-      body.empty();
-      body.createDiv({ cls: "lumod-lookup-status", text: `Could not look up the selection${reason}.` });
-      return;
+      if (panel.isOpen) panel.showError(error);
     }
-    if (id !== this.lookupInFlight || this.selectionPalette !== panel) return;
-    panel.querySelector(".lumod-lookup-title")?.setText(result.text || pending.quote);
-    body.empty();
-    renderLookupResult(body, result);
-    if (result.kind === "not-found") return;
-    const actions = panel.createDiv({ cls: "lumod-lookup-actions" });
-    const copy = actions.createEl("button", { text: "Copy", attr: { type: "button" } });
-    const save = actions.createEl("button", { cls: "mod-cta", text: "Save as highlight", attr: { type: "button" } });
-    copy.addEventListener("click", event => {
-      event.stopPropagation();
-      void this.writeClipboard(`${result.text}: ${lookupSummary(result)}`).then(() => copy.setText("Copied"));
-    });
-    save.addEventListener("click", event => {
-      event.stopPropagation();
-      this.selection = pending;
-      const saved = this.commitSelection("highlight", color, false, { note: lookupSummary(result), tags: [lookupTag(result)] });
-      if (!saved) new Notice("Could not highlight the selection.");
-    });
   }
 
-  /** Replaces the selection toolbar with an empty lookup result panel. */
-  private showLookupPanel(pending: PendingSelection): HTMLElement {
-    this.selectionPalette?.remove();
-    const panel = this.detachedDocument().body.createDiv({ cls: "lumod-selection-palette lumod-lookup-panel", attr: { role: "dialog", "aria-label": "Word lookup result" } });
-    this.prepareDetachedSurface(panel);
-    this.selectionPalette = panel;
-    this.selection = pending;
-    const header = panel.createDiv({ cls: "lumod-lookup-header" });
-    header.createDiv({ cls: "lumod-lookup-title", text: pending.quote.replace(/\s+/g, " ").trim().slice(0, 120) });
-    header.append(iconButton("x", "Close", () => this.closeSelectionPalette()));
-    if (!this.mobileRuntime) {
-      const width = Math.min(420, window.innerWidth - 24);
-      panel.style.left = `${clamp(pending.x - width / 2, 12, window.innerWidth - width - 12)}px`;
-      panel.style.top = `${clamp(pending.y + 12, 12, Math.max(12, window.innerHeight - 340))}px`;
-    }
-    return panel;
+  private closeLookupPanel(): void {
+    this.lookupPanel?.remove();
+    this.lookupPanel = null;
   }
 
   /**
@@ -4391,6 +4377,7 @@ export class LumenPdfView extends FileView {
   }
 
   private async teardownDocument(invalidate = true): Promise<void> {
+    this.closeLookupPanel();
     if (invalidate) this.documentGeneration++;
     this.readerReady = false;
     this.observer?.disconnect();
@@ -4499,26 +4486,6 @@ export class LumenPdfView extends FileView {
 }
 
 /** Name highlight colors for one PDF, and add, change or remove extra colors. */
-/** Fills `container` with a lookup result: a definition for English, otherwise a translation. */
-function renderLookupResult(container: HTMLElement, result: LookupResult): void {
-  if (result.kind === "definition") {
-    if (result.phonetic) container.createDiv({ cls: "lumod-lookup-phonetic", text: result.phonetic });
-    for (const meaning of result.meanings) {
-      if (meaning.partOfSpeech) container.createEl("h4", { cls: "lumod-lookup-pos", text: meaning.partOfSpeech });
-      const list = container.createEl("ol", { cls: "lumod-lookup-senses" });
-      for (const sense of meaning.senses) {
-        const item = list.createEl("li", { text: sense.definition });
-        if (sense.example) item.createDiv({ cls: "lumod-lookup-example", text: `“${sense.example}”` });
-      }
-    }
-  } else if (result.kind === "translation") {
-    container.createDiv({ cls: "lumod-lookup-translation", text: result.translation });
-    container.createDiv({ cls: "lumod-lookup-source", text: `Translated from ${languageName(result.sourceLanguage)}` });
-  } else {
-    container.createDiv({ cls: "lumod-lookup-status", text: "No definition found." });
-  }
-}
-
 /** Picks the annotated PDF (usually an earlier version of this one) to copy annotations from. */
 class VersionPickerModal extends FuzzySuggestModal<AnnotationBundleInfo> {
   constructor(view: LumenPdfView, private readonly bundles: AnnotationBundleInfo[], private readonly onChoose: (item: AnnotationBundleInfo) => void) {

@@ -1858,67 +1858,12 @@
   }
 }
 
-/* Word lookup result, shown in place of the selection toolbar. */
-.lumod-selection-palette.lumod-lookup-panel {
-  display: block;
-  width: min(420px, calc(100vw - 24px));
-  max-height: min(60vh, 420px);
-  min-height: 0;
-  padding: 10px 14px 12px;
-  overflow-y: auto;
-  border-radius: var(--radius-m);
-  user-select: text;
-  -webkit-user-select: text;
+/* The define-or-translate panel sits just below the toolbar. */
+.lumod-reader {
+  --lu-top: 60px;
 }
-.lumod-lookup-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.lumod-lookup-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: var(--font-ui-medium);
-  font-weight: var(--font-semibold);
-}
-.lumod-lookup-phonetic,
-.lumod-lookup-source,
-.lumod-lookup-example,
-.lumod-lookup-status {
-  color: var(--text-muted);
-}
-.lumod-lookup-pos {
-  margin: 12px 0 4px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-semibold);
-}
-.lumod-lookup-senses {
-  margin: 0;
-  padding-left: 1.4em;
-  line-height: 1.5;
-}
-.lumod-lookup-senses li + li {
-  margin-top: 4px;
-}
-.lumod-lookup-translation {
-  margin-bottom: 4px;
-  font-size: var(--font-ui-large);
-  line-height: 1.4;
-}
-/* Keep Copy and Save visible while a long definition scrolls. */
-.lumod-lookup-actions {
-  position: sticky;
-  bottom: -12px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin: 12px -14px -12px;
-  padding: 10px 14px 12px;
-  background: var(--background-primary);
-  border-top: 1px solid var(--background-modifier-border);
+.lumod-reader.is-mobile {
+  --lu-top: calc(var(--lumod-mobile-toolbar-height) + 14px + env(safe-area-inset-top, 0px));
 }
 
 /* Area annotations: a box around an image or table, saved as a picture. */
@@ -2275,4 +2220,123 @@
   align-self: flex-start;
   margin: 6px 0;
   font-size: 12px;
+}
+
+/* Define-or-translate panel, shared with PDF Annotator (keep identical in both plugins).
+   Selectable for copying by hand; above each plugin's selection toolbar. */
+.lu-panel {
+  position: absolute;
+  z-index: 1140;
+  top: var(--lu-top, 56px);
+  left: 50%;
+  width: min(420px, calc(100% - 24px));
+  max-height: min(60vh, calc(100% - var(--lu-top, 56px) - 24px));
+  padding: 12px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  transform: translateX(-50%);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.lu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.lu-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+.lu-close {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+}
+.lu-phonetic,
+.lu-source,
+.lu-example,
+.lu-status {
+  color: var(--text-muted);
+}
+.lu-error {
+  margin-top: 8px;
+  color: var(--text-error);
+}
+.lu-pos {
+  margin: 12px 0 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+.lu-senses {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.5;
+}
+.lu-senses li + li {
+  margin-top: 4px;
+}
+.lu-translation {
+  margin-bottom: 4px;
+  font-size: var(--font-ui-large);
+  line-height: 1.4;
+}
+/* Copy and Save stay visible while a long result scrolls. */
+.lu-actions {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 12px -14px -12px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+/* The panel's buttons look the same whatever button styles each plugin has. */
+.lu-panel .lu-actions button:not(#lu-specificity) {
+  height: auto;
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal, var(--background-secondary));
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+.lu-panel .lu-actions button.mod-cta:not(#lu-specificity) {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #fff);
+}
+.lu-panel .lu-close:not(#lu-specificity) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+.lu-panel .lu-close:not(#lu-specificity):hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+@media (pointer: coarse) {
+  .lu-close,
+  .lu-actions button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
