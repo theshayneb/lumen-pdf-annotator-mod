@@ -412,6 +412,11 @@ export class AnnotationRepository {
     }, 220);
   }
 
+  /** Changes made here that are not on disk yet (a reload from disk would lose them). */
+  get hasPendingWrites(): boolean {
+    return this.queued.size > 0 || this.flushing !== null || this.flushTimer !== null;
+  }
+
   async flushJournal(): Promise<void> {
     if (this.flushTimer !== null) window.clearTimeout(this.flushTimer);
     this.flushTimer = null;

@@ -194,6 +194,9 @@ function errorName(error: unknown): string | undefined {
     : undefined;
 }
 
+/** The color of highlights saved from Define: blue. */
+const DEFINITION_COLOR = MARK_COLORS[2];
+
 /** The color last used to highlight text, used by tag and note next time (in every PDF). */
 let lastSelectionColor: string = MARK_COLORS[0];
 
@@ -358,6 +361,7 @@ export class LumenPdfView extends FileView {
   private areaMode = false;
   private sidecarOpenButton: HTMLButtonElement | null = null;
   private sidecarCheckTimer = 0;
+  private externalReloadTimer = 0;
   private areaButton: HTMLButtonElement | null = null;
   private areaDraft: AreaDraft | null = null;
   private readonly pageTextCache = new Map<number, SearchPageData>();
@@ -451,6 +455,13 @@ export class LumenPdfView extends FileView {
     for (const name of ["create", "delete", "rename"] as const) {
       this.registerEvent(this.app.vault.on(name as "create", file => {
         if (file instanceof TFile && file.extension === "md") this.refreshSidecarButton();
+      }));
+    }
+    // Another device's changes arrive as changed files in this PDF's annotation folder.
+    for (const name of ["create", "modify"] as const) {
+      this.registerEvent(this.app.vault.on(name as "modify", file => {
+        const folder = this.bundle?.folder;
+        if (folder && file instanceof TFile && file.path.startsWith(`${folder}/`) && /\.(json|jsonl|md)$/.test(file.name)) this.scheduleExternalReload();
       }));
     }
     if (!this.mobileRuntime) return;
@@ -712,6 +723,57 @@ export class LumenPdfView extends FileView {
     const path = await writeSidecar(this.app.vault, this.bundleFile, this.index, await this.currentNoteLayout(), this.colorNames, this.colorOrder, this.sidecarLookup());
     this.refreshSidecarButton();
     return path;
+  }
+
+  private scheduleExternalReload(): void {
+    window.clearTimeout(this.externalReloadTimer);
+    this.externalReloadTimer = window.setTimeout(() => void this.reloadFromDisk().catch(error => {
+      console.error("Could not reload annotations changed on another device", error);
+    }), 1500);
+  }
+
+  /**
+   * Reloads this PDF's annotations and colors from disk after another device
+   * changed them (through vault sync), so an open PDF shows their changes and
+   * never writes its older copy back. Waits while changes made here are still
+   * being saved; the plugin's own saves read back unchanged and do nothing.
+   */
+  private async reloadFromDisk(): Promise<void> {
+    const bundle = this.bundle;
+    const file = this.bundleFile;
+    if (!bundle || !file) return;
+    if (bundle.repository.hasPendingWrites) {
+      this.scheduleExternalReload();
+      return;
+    }
+    const reader = new AnnotationRepository(this.app.vault, bundle.folder, bundle.hash, file.path);
+    const [loaded, names, extras, order, layout] = await Promise.all([
+      reader.load(), reader.loadColorNames(), reader.loadExtraColors(), reader.loadColorOrder(), reader.loadNoteLayout(),
+    ]);
+    if (bundle !== this.bundle || bundle.repository.hasPendingWrites) return;
+    const fingerprint = (index: AnnotationIndex) => index.all()
+      .map(item => `${item.id}\u0000${item.updatedAt}\u0000${item.color}\u0000${item.style}\u0000${item.note}\u0000${item.tags.join(",")}\u0000${item.groupId ?? ""}`)
+      .sort().join("\n");
+    const annotationsChanged = fingerprint(loaded) !== fingerprint(this.index);
+    const colorsChanged = JSON.stringify([names, extras, order]) !== JSON.stringify([this.colorNames, this.extraColors, this.colorOrder]);
+    if (layout && layout !== this.noteLayout) this.noteLayout = layout;
+    if (!annotationsChanged && !colorsChanged) return;
+    if (colorsChanged) {
+      this.colorNames = names;
+      this.extraColors = extras;
+      this.colorOrder = order;
+      this.colorNamesVersion++;
+    }
+    if (annotationsChanged) {
+      // An open editor holds the old copy; close it rather than let it save that copy back.
+      this.closeEditor();
+      this.index = loaded;
+      for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
+    }
+    this.inspectorCacheRevision = -1;
+    this.inspectorCacheKey = "";
+    this.filterBarKey = "";
+    this.refreshInspector();
   }
 
   /** Shows the "Open sidecar note" button only while this PDF has a sidecar. */
@@ -2641,7 +2703,9 @@ export class LumenPdfView extends FileView {
       onCopy: text => this.writeClipboard(text),
       onSave: async result => {
         this.selection = pending;
-        if (!this.commitSelection("highlight", color, false, { note: lookupSummary(result), tags: [lookupTag(result)] })) {
+        // Words saved from Define are always blue, so they stand out from other highlights.
+        const saveColor = mode === "define" ? DEFINITION_COLOR : color;
+        if (!this.commitSelection("highlight", saveColor, false, { note: lookupSummary(result), tags: [lookupTag(result)] })) {
           throw new Error("Could not highlight the selection.");
         }
       },
@@ -4390,6 +4454,7 @@ export class LumenPdfView extends FileView {
 
   private async teardownDocument(invalidate = true): Promise<void> {
     this.closeLookupPanel();
+    window.clearTimeout(this.externalReloadTimer);
     if (invalidate) this.documentGeneration++;
     this.readerReady = false;
     this.observer?.disconnect();
