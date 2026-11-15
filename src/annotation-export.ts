@@ -5,13 +5,13 @@ import { colorName, hasCustomColorName, orderColors } from "./model";
 import type { ColorNames } from "./model";
 import type { AnnotationIndex, PdfAnnotation } from "./model";
 import { areaImageName } from "./storage";
+import { byColorLines, calloutLines, CALLOUT_HEADER, LayoutEntry, NoteLayout } from "./note-layout";
 
 /** An embed of an area annotation's saved picture. */
 function areaEmbed(annotation: PdfAnnotation): string {
   return `![[${areaImageName(annotation.groupId || annotation.id)}]]`;
 }
 
-export type SidecarGrouping = "page" | "color";
 
 interface ExportEntry {
   anchor: PdfAnnotation;
@@ -139,53 +139,36 @@ function markdownColorName(color: string, names: ColorNames): string {
   return name === color ? `Custom color \`${color.replace(/`/g, "")}\`` : name;
 }
 
-/**
- * One annotation as a bullet, with its note (if any) as a nested quote item:
- *
- *     - highlighted text #tag *([pg. 3](obsidian://…))*
- *     	- ["] *note*
- *
- * Tags always follow the highlighted text. The page link opens the annotation
- * in the PDF.
- */
-function renderEntry(lines: string[], entry: ExportEntry, vaultName: string, pdfPath: string): void {
+/** Tags a saved word lookup gets; such entries are written like the ePub reader's lookups. */
+const LOOKUP_TAGS = new Set(["definition", "translation"]);
+
+/** One logical annotation in the shared note-layout form. */
+function layoutEntry(entry: ExportEntry, vaultName: string, pdfPath: string): LayoutEntry {
   const { anchor, members, pages } = entry;
   const note = members.find(item => item.id === (anchor.groupId || anchor.id) && item.note.trim())?.note
-    ?? members.find(item => item.note.trim())?.note;
-  const tags = (members.find(item => item.tags.length)?.tags ?? []).map(tagLabel).join(" ");
+    ?? members.find(item => item.note.trim())?.note ?? "";
+  const tags = members.find(item => item.tags.length)?.tags ?? [];
   // Parts of one annotation on several pages usually share the full quote.
   // An area shows its picture instead of the text found inside it.
   const quote = anchor.kind === "area" ? areaEmbed(anchor) : Array.from(new Set(members
     .filter(item => item.kind === "text" && item.quote.trim())
     .map(item => escapeInline(item.quote.replace(/\s+/g, " ").trim()))))
     .join(" … ");
-  const pageText = pages.length === 1 ? `pg. ${pages[0]}` : `pgs. ${pages.join(", ")}`;
-  const link = `*([${pageText}](${annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id)}))*`;
-  const highlight = [quote || "Page note"];
-  if (tags) highlight.push(tags);
-  highlight.push(link);
-  lines.push(`- ${highlight.join(" ")}`);
-  if (note) {
-    const noteText = escapeInline(note.replace(/\s+/g, " ").trim());
-    lines.push(`\t- ["] *${noteText}*`);
-  }
+  const pageNote = anchor.kind === "page-note";
+  return {
+    text: quote || "Page note",
+    tags: tags.map(tagLabel),
+    note: escapeInline(note.replace(/\s+/g, " ").trim()),
+    color: anchor.color,
+    pages: pages.map(String),
+    link: annotationUri(vaultName, pdfPath, anchor.groupId || anchor.id),
+    plain: pageNote || (anchor.kind === "text" && !!note.trim() && tags.some(tag => LOOKUP_TAGS.has(tag.toLowerCase()))),
+    pageNote,
+  };
 }
 
-/** A CSS color safe to put in a style attribute, or null. */
-function safeCssColor(color: string): string | null {
-  const value = color.trim();
-  return /^#[0-9a-f]{3,8}$/i.test(value) || /^[a-z]+$/i.test(value) || /^(rgb|hsl)a?\([\d.,%\s]+\)$/i.test(value) ? value : null;
-}
-
-/** A color-group heading, shown in the highlight's own color. */
-function colorHeading(color: string, names: ColorNames): string {
-  const label = markdownColorName(color, names);
-  const css = safeCssColor(color);
-  return css ? `# <span style="color: ${css}">${label}</span>` : `# ${label}`;
-}
-
-/** Markdown for a sidecar note, grouped by highlight color or by page. */
-export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = []): Promise<string> {
+/** Markdown for a sidecar note in the PDF's layout: headings by color, or the quotes callout. */
+export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, vaultName: string, layout: NoteLayout, names: ColorNames = {}, order: string[] = []): Promise<string> {
   const entries = await exportEntries(index);
   const lines = [
     "---",
@@ -194,42 +177,23 @@ export async function renderSidecarMarkdown(index: AnnotationIndex, pdf: TFile, 
     "",
   ];
   if (!entries.length) lines.push("*No annotations yet.*", "");
-  if (grouping === "color") {
-    const groups = new Map<string, ExportEntry[]>();
-    const notes: ExportEntry[] = [];
-    for (const entry of entries) {
-      if (entry.anchor.kind === "page-note") {
-        notes.push(entry);
-        continue;
-      }
-      const group = groups.get(entry.anchor.color) ?? [];
-      group.push(entry);
-      groups.set(entry.anchor.color, group);
-    }
-    for (const color of orderColors(Array.from(groups.keys()), names, order)) {
-      lines.push(colorHeading(color, names), "");
-      for (const entry of groups.get(color) ?? []) renderEntry(lines, entry, vaultName, pdf.path);
-      lines.push("");
-    }
-    if (notes.length) {
-      lines.push("# Page notes", "");
-      for (const entry of notes) renderEntry(lines, entry, vaultName, pdf.path);
-      lines.push("");
-    }
+  if (layout === "callout") {
+    // Reading order: by page, then down the page.
+    const ordered = entries.slice().sort((a, b) => a.pages[0] - b.pages[0]
+      || (a.members[0]?.rects[0]?.y ?? 0) - (b.members[0]?.rects[0]?.y ?? 0)
+      || a.anchor.createdAt - b.anchor.createdAt);
+    if (ordered.length) lines.push(...calloutLines(ordered.map(entry => layoutEntry(entry, vaultName, pdf.path))), "");
   } else {
-    let currentPage = -1;
-    for (const entry of entries) {
-      if (entry.pages[0] !== currentPage) {
-        if (currentPage !== -1) lines.push("");
-        currentPage = entry.pages[0];
-        lines.push(`# Page ${currentPage}`, "");
-      }
-      renderEntry(lines, entry, vaultName, pdf.path);
-    }
-    if (currentPage !== -1) lines.push("");
+    const colors = orderColors(Array.from(new Set(entries.filter(entry => entry.anchor.kind !== "page-note").map(entry => entry.anchor.color))), names, order);
+    lines.push(...byColorLines(entries.map(entry => layoutEntry(entry, vaultName, pdf.path)), colors, color => markdownColorName(color, names)));
   }
   lines.push(SIDECAR_END, "");
   return lines.join("\n");
+}
+
+/** The layout an existing sidecar was written in, judged from its text. */
+export function sidecarLayout(content: string): NoteLayout {
+  return content.split(/\r?\n/).some(line => line.trim() === CALLOUT_HEADER) ? "callout" : "by-color";
 }
 
 export class SidecarConflictError extends Error {
@@ -356,9 +320,9 @@ function keptText(content: string): string {
  * moved). Existing notes are overwritten only when they are this PDF's
  * sidecar, and text the user added below the end marker is carried over.
  */
-export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, grouping: SidecarGrouping, names: ColorNames = {}, order: string[] = [], lookup?: SidecarLookup): Promise<string> {
+export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIndex, layout: NoteLayout, names: ColorNames = {}, order: string[] = [], lookup?: SidecarLookup): Promise<string> {
   const path = await sidecarPath(vault, pdf, lookup);
-  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), grouping, names, order);
+  const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), layout, names, order);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
     let changed = false;

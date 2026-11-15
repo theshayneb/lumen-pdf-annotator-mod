@@ -1,4 +1,5 @@
 import { normalizePath, TFile, TFolder, Vault } from "obsidian";
+import { isNoteLayout, NoteLayout } from "./note-layout";
 import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MarkStyle, normalizeColorNames, normalizeColorOrder, normalizeExtraColors, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
 
@@ -20,6 +21,7 @@ const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
 const COLOR_NAMES_FILE = "color-names.json";
 // The heading order last chosen for this PDF's sidecar note.
 const COLOR_ORDER_FILE = "color-order.json";
+const NOTE_LAYOUT_FILE = "note-layout.json";
 // Highlight colors added to this PDF's palette beyond the built-in five.
 const EXTRA_COLORS_FILE = "extra-colors.json";
 const ANNOTATION_FILES = [
@@ -314,6 +316,7 @@ export class AnnotationRepository {
   private readonly journalPath: string;
   private readonly colorNamesPath: string;
   private readonly colorOrderPath: string;
+  private readonly noteLayoutPath: string;
   private readonly extraColorsPath: string;
   private readonly queued = new Map<string, AnnotationMutation>();
   private flushTimer: number | null = null;
@@ -335,6 +338,7 @@ export class AnnotationRepository {
     this.journalPath = `${folder}/annotations.journal.jsonl`;
     this.colorNamesPath = `${folder}/${COLOR_NAMES_FILE}`;
     this.colorOrderPath = `${folder}/${COLOR_ORDER_FILE}`;
+    this.noteLayoutPath = `${folder}/${NOTE_LAYOUT_FILE}`;
     this.extraColorsPath = `${folder}/${EXTRA_COLORS_FILE}`;
   }
 
@@ -487,6 +491,21 @@ export class AnnotationRepository {
     await this.vault.adapter.write(this.colorOrderPath, JSON.stringify(normalizeColorOrder(order), null, 2));
   }
 
+  /** The note layout chosen for this PDF, or null before one has been chosen. */
+  async loadNoteLayout(): Promise<NoteLayout | null> {
+    if (!(await this.vault.adapter.exists(this.noteLayoutPath))) return null;
+    try {
+      const value = (JSON.parse(await this.vault.adapter.read(this.noteLayoutPath)) as { layout?: unknown }).layout;
+      return isNoteLayout(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveNoteLayout(layout: NoteLayout): Promise<void> {
+    await this.vault.adapter.write(this.noteLayoutPath, JSON.stringify({ layout }, null, 2));
+  }
+
   async loadExtraColors(): Promise<string[]> {
     if (!(await this.vault.adapter.exists(this.extraColorsPath))) return [];
     try {
@@ -562,7 +581,7 @@ async function importPreviousAnnotations(vault: Vault, hash: string, folder: str
     const source = `${root}/${hash}`;
     if (!(await hasAnnotationFiles(vault, source))) continue;
     try {
-      for (const name of [...ANNOTATION_FILES, COLOR_NAMES_FILE, COLOR_ORDER_FILE, EXTRA_COLORS_FILE]) {
+      for (const name of [...ANNOTATION_FILES, COLOR_NAMES_FILE, COLOR_ORDER_FILE, EXTRA_COLORS_FILE, NOTE_LAYOUT_FILE]) {
         if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
       }
     } catch (error) {

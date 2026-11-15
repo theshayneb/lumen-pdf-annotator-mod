@@ -15,7 +15,8 @@ import {
   ResolvedOutlineEntry,
   resolvePdfOutline,
 } from "./outline";
-import { existingSidecarPath, SidecarConflictError, SidecarGrouping, SidecarLookup, writeSidecar } from "./annotation-export";
+import { existingSidecarPath, SidecarConflictError, SidecarLookup, sidecarLayout, writeSidecar } from "./annotation-export";
+import { chooseColorOrder, chooseNoteLayout, NoteLayout } from "./note-layout";
 import { AnnotationBundleInfo, AnnotationRepository, areaImageName, DocumentBundle, ensureFolder, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle } from "./storage";
 import { compactText, locateQuote } from "./version-match";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
@@ -262,7 +263,6 @@ function markLabel(style: MarkStyle): string {
 }
 
 export interface SidecarOptions {
-  grouping: SidecarGrouping;
   autoSync: boolean;
 }
 
@@ -321,6 +321,8 @@ export class LumenPdfView extends FileView {
   private colorNamesVersion = 0;
   // Heading order chosen for this PDF's sidecar, stored in its bundle.
   private colorOrder: string[] = [];
+  /** This PDF's note layout, or null until one is chosen. */
+  private noteLayout: NoteLayout | null = null;
   // Colors added to this PDF's palette, stored in its bundle.
   private extraColors: string[] = [];
   // The PDF that `bundle` and `index` belong to. `this.file` already points at
@@ -387,7 +389,7 @@ export class LumenPdfView extends FileView {
     private readonly legacyAnnotationFolder = "PDF annotations",
     private readonly automaticPdfBackups = false,
     private readonly onReaderReady?: () => void,
-    private readonly sidecarOptions: () => SidecarOptions = () => ({ grouping: "color", autoSync: false }),
+    private readonly sidecarOptions: () => SidecarOptions = () => ({ autoSync: false }),
     private readonly interfaceTheme: () => InterfaceTheme = () => "dark",
     private readonly openInspectorOnLoad: () => boolean = () => true,
   ) {
@@ -521,10 +523,12 @@ export class LumenPdfView extends FileView {
     if (generation !== this.documentGeneration) return;
     let colorNames: ColorNames = {};
     let colorOrder: string[] = [];
+    let noteLayout: NoteLayout | null = null;
     let extraColors: string[] = [];
     try {
       colorNames = await bundle.repository.loadColorNames();
       colorOrder = await bundle.repository.loadColorOrder();
+      noteLayout = await bundle.repository.loadNoteLayout();
       extraColors = await bundle.repository.loadExtraColors();
     } catch (error) { console.error("Lumen could not load color names", error); }
     if (generation !== this.documentGeneration) return;
@@ -533,6 +537,7 @@ export class LumenPdfView extends FileView {
     this.index = index;
     this.colorNames = colorNames;
     this.colorOrder = colorOrder;
+    this.noteLayout = noteLayout;
     this.extraColors = extraColors;
     this.colorNamesVersion++;
     this.sidecarConflictReported = false;
@@ -696,7 +701,7 @@ export class LumenPdfView extends FileView {
     window.clearTimeout(this.sidecarTimer);
     this.sidecarTimer = 0;
     if (!this.bundle || !this.bundleFile) return null;
-    const path = await writeSidecar(this.app.vault, this.bundleFile, this.index, this.sidecarOptions().grouping, this.colorNames, this.colorOrder, this.sidecarLookup());
+    const path = await writeSidecar(this.app.vault, this.bundleFile, this.index, await this.currentNoteLayout(), this.colorNames, this.colorOrder, this.sidecarLookup());
     this.refreshSidecarButton();
     return path;
   }
@@ -760,33 +765,91 @@ export class LumenPdfView extends FileView {
   }
 
   /**
-   * Export the sidecar, first letting the user order its color headings when
-   * it is grouped by color. The chosen order is saved for this PDF.
+   * This PDF's layout: the one chosen for it, else the one its existing
+   * sidecar was written in (remembered from then on), else headings by color.
    */
-  chooseSidecarExport(): void {
-    if (!this.bundle || !this.bundleFile) return;
-    const exportNow = () => void this.exportSidecar().then(async path => {
-      if (!path) return;
-      new Notice(`Annotations exported to ${path}`);
-      await this.openSidecar(path);
-    }).catch(error => {
-      console.error("Lumen could not export the sidecar note", error);
-      new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);
-    });
+  private async currentNoteLayout(): Promise<NoteLayout> {
+    if (this.noteLayout) return this.noteLayout;
+    const file = this.bundleFile;
+    const path = file ? await existingSidecarPath(this.app.vault, file, this.sidecarLookup()) : null;
+    const note = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (!(note instanceof TFile)) return "by-color";
+    const layout = sidecarLayout(await this.app.vault.cachedRead(note));
+    await this.rememberNoteLayout(layout);
+    return layout;
+  }
+
+  private async rememberNoteLayout(layout: NoteLayout): Promise<void> {
+    this.noteLayout = layout;
+    await this.bundle?.repository.saveNoteLayout(layout);
+  }
+
+  /** Asks for the order of this PDF's color headings and saves it. False when cancelled. */
+  private async chooseHeadingOrder(confirmText: string): Promise<boolean> {
     const counts = new Map<string, number>();
     for (const item of this.index.logicalAll()) {
       if (item.kind !== "page-note") counts.set(item.color, (counts.get(item.color) ?? 0) + 1);
     }
-    if (this.sidecarOptions().grouping !== "color" || counts.size < 2) {
-      exportNow();
-      return;
-    }
+    if (counts.size < 2) return true;
     const colors = orderColors(Array.from(counts.keys()), this.colorNames, this.colorOrder);
-    new SidecarOrderModal(this, colors, counts, this.colorNames, async order => {
-      this.colorOrder = order.map(color => color.toLowerCase());
-      await this.bundle?.repository.saveColorOrder(this.colorOrder);
-      exportNow();
-    }).open();
+    const order = await chooseColorOrder(this.app, colors.map(color => ({ color, label: colorName(color, this.colorNames), count: counts.get(color) ?? 0 })), {
+      subject: "this PDF",
+      defaultOrder: orderColors(colors, this.colorNames),
+      confirmText,
+    });
+    if (!order) return false;
+    this.colorOrder = order.map(color => color.toLowerCase());
+    await this.bundle?.repository.saveColorOrder(this.colorOrder);
+    return true;
+  }
+
+  /**
+   * Export the sidecar. The first time, asks which layout this PDF's note
+   * uses; with headings by color, lets the user order the headings (the order
+   * is saved for this PDF).
+   */
+  chooseSidecarExport(): void {
+    void this.runSidecarExport().catch(error => {
+      console.error("Could not export the sidecar note", error);
+      new Notice(error instanceof Error ? error.message : "Could not export the sidecar note.", 8000);
+    });
+  }
+
+  private async runSidecarExport(): Promise<void> {
+    if (!this.bundle || !this.bundleFile) return;
+    const file = this.bundleFile;
+    if (!this.noteLayout && !(await existingSidecarPath(this.app.vault, file, this.sidecarLookup()))) {
+      const layout = await chooseNoteLayout(this.app, file.basename);
+      if (!layout || file !== this.bundleFile) return;
+      await this.rememberNoteLayout(layout);
+    }
+    if (await this.currentNoteLayout() === "by-color" && !(await this.chooseHeadingOrder("Export"))) return;
+    const path = await this.exportSidecar();
+    if (!path) return;
+    new Notice(`Annotations exported to ${path}`);
+    await this.openSidecar(path);
+  }
+
+  /** Switches this PDF's note between headings by color and the quotes callout. */
+  changeNoteLayout(): void {
+    void (async () => {
+      if (!this.bundle || !this.bundleFile) return;
+      const file = this.bundleFile;
+      const current = await this.currentNoteLayout();
+      const layout = await chooseNoteLayout(this.app, file.basename, this.noteLayout ? current : null);
+      if (!layout || file !== this.bundleFile) return;
+      await this.rememberNoteLayout(layout);
+      if (!(await existingSidecarPath(this.app.vault, file, this.sidecarLookup()))) {
+        new Notice("Layout saved. It will be used when you export this PDF's note.");
+        return;
+      }
+      if (layout === "by-color" && !(await this.chooseHeadingOrder("Update note"))) return;
+      const path = await this.exportSidecar();
+      if (path) new Notice(`Updated ${path}`);
+    })().catch(error => {
+      console.error("Could not change the note layout", error);
+      new Notice(error instanceof Error ? error.message : "Could not change the note layout.", 8000);
+    });
   }
 
   private scheduleSidecarSync(): void {
@@ -4116,7 +4179,7 @@ export class LumenPdfView extends FileView {
     try {
       const repository = new AnnotationRepository(this.app.vault, source.folder, source.hash, source.manifest.workingPath);
       const old = await repository.load();
-      const [names, order, extras] = await Promise.all([repository.loadColorNames(), repository.loadColorOrder(), repository.loadExtraColors()]);
+      const [names, order, extras, layout] = await Promise.all([repository.loadColorNames(), repository.loadColorOrder(), repository.loadExtraColors(), repository.loadNoteLayout()]);
       const document = await this.buildQuoteDocumentIndex(pdfDocument, generation);
       if (generation !== this.documentGeneration || bundle !== this.bundle) return;
       const compact = compactText(document);
@@ -4195,6 +4258,7 @@ export class LumenPdfView extends FileView {
         bundle.repository.queue({ op: "put", annotation });
       }
       await this.mergeVersionColors(names, order, extras);
+      if (layout && !this.noteLayout) await this.rememberNoteLayout(layout);
       for (const state of this.mountedPages) this.renderMarks(state.pageNumber);
       this.refreshInspector();
       const parts = [`Copied ${copied} annotation${copied === 1 ? "" : "s"} from ${source.manifest.originalName}.`];
@@ -4437,6 +4501,7 @@ export class LumenPdfView extends FileView {
     if (this.sidecarOpenButton) this.sidecarOpenButton.hidden = true;
     this.colorNames = {};
     this.colorOrder = [];
+    this.noteLayout = null;
     this.extraColors = [];
     this.colorNamesVersion++;
     this.index = new AnnotationIndex();
@@ -4655,68 +4720,3 @@ class ColorNamesModal extends Modal {
 }
 
 /** Choose the order of a sidecar note's color headings, then export. */
-class SidecarOrderModal extends Modal {
-  private order: string[];
-  private listEl!: HTMLElement;
-
-  constructor(
-    view: LumenPdfView,
-    colors: string[],
-    private readonly counts: Map<string, number>,
-    private readonly names: ColorNames,
-    private readonly onExport: (order: string[]) => Promise<void>,
-  ) {
-    super(view.app);
-    this.order = colors.slice();
-  }
-
-  onOpen(): void {
-    this.modalEl.addClass("lumod-sidecar-order-modal");
-    this.titleEl.setText("Order sidecar headings");
-    this.contentEl.createEl("p", {
-      cls: "lumod-color-names-help",
-      text: "Move headings up or down. This order is saved for this PDF and used for automatic updates too.",
-    });
-    this.listEl = this.contentEl.createDiv({ cls: "lumod-sidecar-order-list" });
-    this.renderList();
-    new Setting(this.contentEl)
-      .addButton(button => button.setButtonText("Default order").onClick(() => {
-        this.order = orderColors(this.order, this.names);
-        this.renderList();
-      }))
-      .addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton(button => button.setButtonText("Export").setCta().onClick(() => {
-        void this.onExport(this.order).then(() => this.close()).catch(error => {
-          console.error("Lumen could not save the heading order", error);
-          new Notice("Could not save the heading order.");
-        });
-      }));
-  }
-
-  private move(index: number, delta: number): void {
-    const target = index + delta;
-    if (target < 0 || target >= this.order.length) return;
-    [this.order[index], this.order[target]] = [this.order[target], this.order[index]];
-    this.renderList();
-  }
-
-  private renderList(): void {
-    this.listEl.empty();
-    this.order.forEach((color, index) => {
-      const row = this.listEl.createDiv({ cls: "lumod-sidecar-order-row" });
-      const swatch = row.createSpan({ cls: "lumod-color-names-swatch" });
-      swatch.style.setProperty("--mark-color", color);
-      row.createSpan({ cls: "lumod-sidecar-order-name", text: colorName(color, this.names) });
-      row.createSpan({ cls: "lumod-sidecar-order-count", text: String(this.counts.get(color) ?? 0) });
-      const up = iconButton("arrow-up", `Move ${colorName(color, this.names)} up`, () => this.move(index, -1));
-      const down = iconButton("arrow-down", `Move ${colorName(color, this.names)} down`, () => this.move(index, 1));
-      up.disabled = index === 0;
-      down.disabled = index === this.order.length - 1;
-      row.append(up, down);
-    });
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-}

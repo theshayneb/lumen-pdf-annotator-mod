@@ -2,6 +2,12 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.40 — 2026-11-15
+
+- **Note layout per PDF.** The first time you export a PDF's sidecar, choose its layout: **Headings by color** (as before) or the **Quotes callout** used by ePub Reader (`> > > [!quotenew] Quotes & References`, one line per highlight in reading order: `> > - passage #quote #tags *-- note* *([p. 14](link))*`). The choice is saved per PDF; change it with the new command **Change note layout for this PDF**. Existing sidecars keep the layout they already have.
+- The layout and heading-order windows are shared with ePub Reader, so both plugins ask the same way and write the same Markdown.
+- Removed the **Sidecar note grouping** setting (by color / by page); the per-PDF layout replaces it.
+
 ## 1.0.39 — 2026-11-15
 
 - Fixed toolbar icons shrinking to dots on Android tablets (and anywhere Obsidian adds padding to buttons): plugin buttons no longer take that padding and their icons can't be squeezed. Toolbar icons on touch screens are also a little bigger (20px).

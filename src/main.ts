@@ -3,7 +3,6 @@ import type { SettingDefinitionItem } from "obsidian";
 import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
 import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, migrateAreaImages, migrateStorageFolder, restoreBundle, verifyBundle } from "./storage";
-import type { SidecarGrouping } from "./annotation-export";
 import { InterfaceTheme, LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
 
@@ -14,7 +13,6 @@ interface LumenSettings {
   openAnnotationsPanel: boolean;
   legacyAnnotationFolder: string;
   automaticPdfBackups: boolean;
-  sidecarGrouping: SidecarGrouping;
   sidecarAutoUpdate: boolean;
 }
 
@@ -25,7 +23,6 @@ const DEFAULT_SETTINGS: LumenSettings = {
   openAnnotationsPanel: true,
   legacyAnnotationFolder: "PDF annotations",
   automaticPdfBackups: false,
-  sidecarGrouping: "color",
   sidecarAutoUpdate: true,
 };
 
@@ -35,10 +32,6 @@ function isPdfTheme(value: unknown): value is PdfTheme {
 
 function isInterfaceTheme(value: unknown): value is InterfaceTheme {
   return value === "dark" || value === "light" || value === "pdf";
-}
-
-function isSidecarGrouping(value: unknown): value is SidecarGrouping {
-  return value === "page" || value === "color";
 }
 
 function readSettings(value: unknown): LumenSettings {
@@ -51,7 +44,6 @@ function readSettings(value: unknown): LumenSettings {
     openAnnotationsPanel: typeof stored.openAnnotationsPanel === "boolean" ? stored.openAnnotationsPanel : DEFAULT_SETTINGS.openAnnotationsPanel,
     legacyAnnotationFolder: typeof stored.legacyAnnotationFolder === "string" ? stored.legacyAnnotationFolder : DEFAULT_SETTINGS.legacyAnnotationFolder,
     automaticPdfBackups: typeof stored.automaticPdfBackups === "boolean" ? stored.automaticPdfBackups : DEFAULT_SETTINGS.automaticPdfBackups,
-    sidecarGrouping: isSidecarGrouping(stored.sidecarGrouping) ? stored.sidecarGrouping : DEFAULT_SETTINGS.sidecarGrouping,
     sidecarAutoUpdate: typeof stored.sidecarAutoUpdate === "boolean" ? stored.sidecarAutoUpdate : DEFAULT_SETTINGS.sidecarAutoUpdate,
   };
 }
@@ -88,7 +80,7 @@ export default class LumenPdfPlugin extends Plugin {
       this.settings.legacyAnnotationFolder,
       this.settings.automaticPdfBackups,
       () => this.viewState.attach(leaf),
-      () => ({ grouping: this.settings.sidecarGrouping, autoSync: this.settings.sidecarAutoUpdate }),
+      () => ({ autoSync: this.settings.sidecarAutoUpdate }),
       () => this.settings.interfaceTheme,
       () => this.settings.openAnnotationsPanel,
     ));
@@ -128,6 +120,7 @@ export default class LumenPdfPlugin extends Plugin {
       if (path) new Notice(`Annotations exported to ${path}`);
     });
     this.addReaderCommand("export-annotations-sidecar", "Export annotations to sidecar Markdown note", view => view.chooseSidecarExport());
+    this.addReaderCommand("change-note-layout", "Change note layout for this PDF", view => view.changeNoteLayout());
     this.addReaderCommand("import-legacy-annotations", "Import legacy annotations for this PDF", view => view.importLegacyAnnotations(true));
     this.addCommand({ id: "verify-pdf-backups", name: "Verify all PDF backup checksums", callback: () => void this.verifyAllBackups() });
     this.addCommand({ id: "restore-backed-up-pdf", name: "Restore a backed-up PDF", callback: () => void this.chooseBackupToRestore() });
@@ -338,11 +331,6 @@ class LumenSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "automaticPdfBackups", defaultValue: DEFAULT_SETTINGS.automaticPdfBackups },
       },
       {
-        name: "Sidecar note grouping",
-        desc: "How the sidecar Markdown note (a .md file with the same name as the PDF, in the vault root) is organized: a heading per highlight color, or per page.",
-        control: { type: "dropdown", key: "sidecarGrouping", options: { color: "By highlight color", page: "By page" }, defaultValue: DEFAULT_SETTINGS.sidecarGrouping },
-      },
-      {
         name: "Keep exported sidecar notes up to date",
         desc: "Once a PDF's sidecar note has been exported, rewrite it automatically a moment after each annotation change, using the heading order you chose. PDFs without a sidecar are left alone. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept.",
         control: { type: "toggle", key: "sidecarAutoUpdate", defaultValue: DEFAULT_SETTINGS.sidecarAutoUpdate },
@@ -364,7 +352,6 @@ class LumenSettingTab extends PluginSettingTab {
     if (key === "openAnnotationsPanel") return this.plugin.settings.openAnnotationsPanel;
     if (key === "legacyAnnotationFolder") return this.plugin.settings.legacyAnnotationFolder;
     if (key === "automaticPdfBackups") return this.plugin.settings.automaticPdfBackups;
-    if (key === "sidecarGrouping") return this.plugin.settings.sidecarGrouping;
     if (key === "sidecarAutoUpdate") return this.plugin.settings.sidecarAutoUpdate;
     return undefined;
   }
@@ -388,10 +375,6 @@ class LumenSettingTab extends PluginSettingTab {
     }
     if (key === "automaticPdfBackups" && typeof value === "boolean") {
       this.plugin.settings.automaticPdfBackups = value;
-      return this.plugin.saveSettings();
-    }
-    if (key === "sidecarGrouping" && isSidecarGrouping(value)) {
-      this.plugin.settings.sidecarGrouping = value;
       return this.plugin.saveSettings();
     }
     if (key === "sidecarAutoUpdate" && typeof value === "boolean") {
