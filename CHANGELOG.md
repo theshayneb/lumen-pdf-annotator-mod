@@ -2,6 +2,10 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.0.41 — 2026-11-15
+
+- The palette, color names, added colors and the **Highlight colors** window now come from a file shared with ePub Reader (`highlight-colors.ts`), so both plugins offer the same colors and the same window. Nothing changes for your PDFs: the colors, names and added colors you have stay as they are.
+
 ## 1.0.40 — 2026-11-15
 
 - **Note layout per PDF.** The first time you export a PDF's sidecar, choose its layout: **Headings by color** (as before) or the **Quotes callout** used by ePub Reader (`> > > [!quotenew] Quotes & References`, one line per highlight in reading order: `> > - passage #quote #tags *-- note* *([p. 14](link))*`). The choice is saved per PDF; change it with the new command **Change note layout for this PDF**. Existing sidecars keep the layout they already have.

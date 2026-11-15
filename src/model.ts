@@ -27,112 +27,20 @@ export type AnnotationMutation =
   | { op: "put"; annotation: PdfAnnotation }
   | { op: "remove"; id: string; at: number };
 
-export const MARK_COLORS = ["#ffd12d", "#83cb67", "#6f9fe8", "#aa78df", "#e463a1"] as const;
-
-const MARK_COLOR_NAMES: Record<string, string> = {
-  "#ffd12d": "Yellow",
-  "#83cb67": "Green",
-  "#6f9fe8": "Blue",
-  "#aa78df": "Purple",
-  "#e463a1": "Pink",
-};
-
-/** Per-PDF names for highlight colours, keyed by lower-case colour value. */
-export type ColorNames = Record<string, string>;
-
-function customColorName(color: string, names?: ColorNames): string {
-  return names?.[color.toLowerCase()]?.trim() ?? "";
-}
-
-/**
- * A readable name for a mark colour: this PDF's custom name if it has one,
- * otherwise the palette name, otherwise the colour's CSS value.
- */
-export function colorName(color: string, names?: ColorNames): string {
-  return customColorName(color, names) || (MARK_COLOR_NAMES[color.toLowerCase()] ?? color);
-}
-
-export function hasCustomColorName(color: string, names?: ColorNames): boolean {
-  return !!customColorName(color, names);
-}
-
-/** The color name that always sorts first, in the panel and in sidecar notes. */
-const PRIORITY_COLOR_NAME = "important";
-
-/**
- * A color named "important" first, then other custom-named colors
- * (alphabetically), then palette order, then any other colors.
- */
-export function compareColors(a: string, b: string, names?: ColorNames): number {
-  const customA = customColorName(a, names);
-  const customB = customColorName(b, names);
-  const priorityA = customA.toLowerCase() === PRIORITY_COLOR_NAME;
-  const priorityB = customB.toLowerCase() === PRIORITY_COLOR_NAME;
-  if (priorityA !== priorityB) return priorityA ? -1 : 1;
-  if (customA || customB) {
-    if (!customA) return 1;
-    if (!customB) return -1;
-    const byName = customA.localeCompare(customB, undefined, { sensitivity: "base" });
-    if (byName) return byName;
-  }
-  const rank = (color: string) => {
-    const index = (MARK_COLORS as readonly string[]).indexOf(color.toLowerCase());
-    return index === -1 ? MARK_COLORS.length : index;
-  };
-  return rank(a) - rank(b) || a.toLowerCase().localeCompare(b.toLowerCase());
-}
-
-/**
- * Sort colors by a chosen order (lower-case color values); colors missing from
- * it follow in the default `compareColors` order.
- */
-export function orderColors(colors: string[], names?: ColorNames, order: string[] = []): string[] {
-  const rank = new Map(order.map((color, index) => [color.toLowerCase(), index]));
-  return colors.slice().sort((a, b) => {
-    const rankA = rank.get(a.toLowerCase()) ?? Number.POSITIVE_INFINITY;
-    const rankB = rank.get(b.toLowerCase()) ?? Number.POSITIVE_INFINITY;
-    if (rankA !== rankB) return rankA < rankB ? -1 : 1;
-    return compareColors(a, b, names);
-  });
-}
-
-export function normalizeColorOrder(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim().toLowerCase())));
-}
-
-/** Suggested extra highlight colors that read well on light pages. */
-export const PRESET_EXTRA_COLORS = ["#ffa94d", "#ff8787", "#63e6be", "#66d9e8", "#c0eb75", "#b197fc", "#d4a373", "#ced4da"] as const;
-export const MAX_EXTRA_COLORS = 12;
-
-/** A `#rrggbb` color in lower case, or null for anything else. */
-export function normalizeHexColor(value: string): string | null {
-  const match = value.trim().toLowerCase().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/);
-  if (!match) return null;
-  const hex = match[1].length === 3 ? match[1].split("").map(char => char + char).join("") : match[1];
-  return `#${hex}`;
-}
-
-/** Extra palette colors for one PDF: valid, unique, not already built in. */
-export function normalizeExtraColors(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const builtIn = new Set<string>(MARK_COLORS);
-  const result: string[] = [];
-  for (const item of value) {
-    const color = typeof item === "string" ? normalizeHexColor(item) : null;
-    if (color && !builtIn.has(color) && !result.includes(color)) result.push(color);
-  }
-  return result.slice(0, MAX_EXTRA_COLORS);
-}
-
-export function normalizeColorNames(value: unknown): ColorNames {
-  const names: ColorNames = {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) return names;
-  for (const [color, name] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof name === "string" && name.trim()) names[color.toLowerCase()] = name.trim().slice(0, 80);
-  }
-  return names;
-}
+export {
+  colorName,
+  compareColors,
+  hasCustomColorName,
+  MARK_COLORS,
+  MAX_EXTRA_COLORS,
+  normalizeColorNames,
+  normalizeColorOrder,
+  normalizeExtraColors,
+  normalizeHexColor,
+  orderColors,
+  PRESET_EXTRA_COLORS,
+} from "./highlight-colors";
+export type { ColorNames } from "./highlight-colors";
 
 export class AnnotationIndex {
   private readonly items = new Map<string, PdfAnnotation>();

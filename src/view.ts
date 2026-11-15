@@ -1,8 +1,8 @@
-import { FileView, FuzzySuggestModal, Menu, Modal, Notice, Platform, Scope, setIcon, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, FuzzySuggestModal, Menu, Notice, Platform, Scope, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import type { PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { TextLayer } from "pdfjs-dist/types/src/display/text_layer";
 import { annotationMarkdownLink } from "./links";
-import { AnnotationIndex, colorName, ColorNames, compareColors, hasCustomColorName, MARK_COLORS, MAX_EXTRA_COLORS, normalizeHexColor, orderColors, PRESET_EXTRA_COLORS, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
+import { AnnotationIndex, colorName, ColorNames, compareColors, hasCustomColorName, MARK_COLORS, MAX_EXTRA_COLORS, orderColors, MarkStyle, newAnnotation, newPageNote, NormalizedRect, PdfAnnotation } from "./model";
 import { annotationTarget, comparableFileName, QuoteAnnotationRecord, quoteAnnotations } from "./legacy";
 import { loadPdf } from "./pdf-runtime";
 import {
@@ -17,6 +17,7 @@ import {
 } from "./outline";
 import { existingSidecarPath, SidecarConflictError, SidecarLookup, sidecarLayout, writeSidecar } from "./annotation-export";
 import { chooseColorOrder, chooseNoteLayout, NoteLayout } from "./note-layout";
+import { HighlightColorsModal } from "./highlight-colors";
 import { AnnotationBundleInfo, AnnotationRepository, areaImageName, DocumentBundle, ensureFolder, LegacyAnnotationRecord, listAnnotationBundles, loadLegacyAnnotations, openBundle } from "./storage";
 import { compactText, locateQuote } from "./version-match";
 import { languageName, lookUpSelection, lookupSummary, lookupTag, LookupResult } from "./word-lookup";
@@ -1439,8 +1440,14 @@ export class LumenPdfView extends FileView {
   openColorNamesModal(): void {
     if (!this.bundle || !this.bundleFile) return;
     const used = new Set(this.index.logicalAll().map(item => item.color.toLowerCase()));
-    new ColorNamesModal(this, this.bundleFile.name, this.knownColors(), this.extraColors, used, this.colorNames,
-      (names, extras, recolor) => this.setPalette(names, extras, recolor)).open();
+    new HighlightColorsModal(this.app, {
+      subject: this.bundleFile.name,
+      colors: this.knownColors(),
+      extras: this.extraColors,
+      used,
+      names: this.colorNames,
+      onSave: (names, extras, recolor) => this.setPalette(names, extras, recolor),
+    }).open();
   }
 
   /** Save names and added colors; `recolor` maps a changed added color to its new value. */
@@ -4509,13 +4516,6 @@ export class LumenPdfView extends FileView {
   }
 }
 
-interface PaletteEntry {
-  /** The color as stored before this edit, or null for a newly added one. */
-  original: string | null;
-  color: string;
-  added: boolean;
-}
-
 /** Name highlight colors for one PDF, and add, change or remove extra colors. */
 /** Fills `container` with a lookup result: a definition for English, otherwise a translation. */
 function renderLookupResult(container: HTMLElement, result: LookupResult): void {
@@ -4552,171 +4552,6 @@ class VersionPickerModal extends FuzzySuggestModal<AnnotationBundleInfo> {
   }
 
   onChooseItem(item: AnnotationBundleInfo): void { this.onChoose(item); }
-}
-
-class ColorNamesModal extends Modal {
-  private readonly draft: ColorNames;
-  private entries: PaletteEntry[];
-  private listEl!: HTMLElement;
-  private addEl!: HTMLElement;
-
-  constructor(
-    view: LumenPdfView,
-    private readonly pdfName: string,
-    colors: string[],
-    extras: string[],
-    private readonly usedColors: Set<string>,
-    current: ColorNames,
-    private readonly onSave: (names: ColorNames, extras: string[], recolor: Map<string, string>) => Promise<void>,
-  ) {
-    super(view.app);
-    this.draft = { ...current };
-    const added = new Set(extras);
-    this.entries = colors.map(color => ({ original: color, color, added: added.has(color.toLowerCase()) }));
-    for (const color of extras) {
-      if (!this.entries.some(entry => entry.color.toLowerCase() === color)) this.entries.push({ original: color, color, added: true });
-    }
-  }
-
-  onOpen(): void {
-    this.modalEl.addClass("lumod-color-names-modal");
-    this.titleEl.setText("Highlight colors");
-    this.contentEl.createEl("p", {
-      cls: "lumod-color-names-help",
-      text: `Colors and names apply only to ${this.pdfName} and its sidecar note. Leave a name empty to use the default.`,
-    });
-    this.listEl = this.contentEl.createDiv();
-    this.addEl = this.contentEl.createDiv({ cls: "lumod-add-color" });
-    this.render();
-    new Setting(this.contentEl)
-      .addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton(button => button.setButtonText("Save").setCta().onClick(() => void this.save()));
-  }
-
-  private addedCount(): number {
-    return this.entries.filter(entry => entry.added).length;
-  }
-
-  private hasColor(color: string): boolean {
-    return this.entries.some(entry => entry.color.toLowerCase() === color.toLowerCase());
-  }
-
-  private render(): void {
-    this.listEl.empty();
-    for (const entry of this.entries) {
-      const key = entry.color.toLowerCase();
-      const setting = new Setting(this.listEl).setName(entry.added ? "Added color" : colorName(entry.color));
-      const swatch = createSpan({ cls: "lumod-color-names-swatch" });
-      swatch.style.setProperty("--mark-color", entry.color);
-      setting.nameEl.prepend(swatch);
-      if (entry.added) {
-        const picker = createEl("input", { cls: "lumod-color-picker", attr: { type: "color", "aria-label": "Change this color" } });
-        picker.value = entry.color;
-        picker.addEventListener("change", () => {
-          const next = normalizeHexColor(picker.value);
-          if (!next || next === key || this.hasColor(next)) {
-            picker.value = entry.color;
-            return;
-          }
-          const name = this.draft[key];
-          delete this.draft[key];
-          if (name) this.draft[next] = name;
-          entry.color = next;
-          this.render();
-        });
-        setting.controlEl.append(picker);
-      }
-      setting.addText(text => text
-        .setPlaceholder(entry.added ? "Name this color" : colorName(entry.color))
-        .setValue(this.draft[key] ?? "")
-        .onChange(value => {
-          if (value.trim()) this.draft[key] = value.trim();
-          else delete this.draft[key];
-        }));
-      if (entry.added) {
-        const inUse = entry.original !== null && this.usedColors.has(entry.original.toLowerCase());
-        setting.addExtraButton(button => button
-          .setIcon("trash-2")
-          .setTooltip(inUse ? "Remove from the palette (existing highlights keep this color)" : "Remove this color")
-          .onClick(() => {
-            this.entries = this.entries.filter(item => item !== entry);
-            delete this.draft[key];
-            this.render();
-          }));
-      }
-    }
-    this.renderAdd();
-  }
-
-  private addColor(value: string): void {
-    const color = normalizeHexColor(value);
-    if (!color) {
-      new Notice("Enter a color as a hex value, such as #ffa94d.");
-      return;
-    }
-    if (this.hasColor(color)) {
-      new Notice("That color is already in the palette.");
-      return;
-    }
-    if (this.addedCount() >= MAX_EXTRA_COLORS) {
-      new Notice(`You can add up to ${MAX_EXTRA_COLORS} colors.`);
-      return;
-    }
-    this.entries.push({ original: null, color, added: true });
-    this.render();
-  }
-
-  private renderAdd(): void {
-    this.addEl.empty();
-    if (this.addedCount() >= MAX_EXTRA_COLORS) return;
-    this.addEl.createDiv({ cls: "setting-item-name", text: "Add a color" });
-    const presets = this.addEl.createDiv({ cls: "lumod-add-color-presets" });
-    for (const color of PRESET_EXTRA_COLORS) {
-      if (this.hasColor(color)) continue;
-      const chip = presets.createEl("button", { cls: "lumod-add-color-chip", attr: { "aria-label": `Add ${color}`, title: color } });
-      chip.style.setProperty("--mark-color", color);
-      chip.addEventListener("click", () => this.addColor(color));
-    }
-    const custom = this.addEl.createDiv({ cls: "lumod-add-color-custom" });
-    const picker = custom.createEl("input", { cls: "lumod-color-picker", attr: { type: "color", "aria-label": "Pick a color" } });
-    picker.value = "#ffa94d";
-    const hex = custom.createEl("input", { attr: { type: "text", placeholder: "Hex color", "aria-label": "Hex color" } });
-    picker.addEventListener("input", () => { hex.value = picker.value; });
-    hex.addEventListener("input", () => {
-      const color = normalizeHexColor(hex.value);
-      if (color) picker.value = color;
-    });
-    const add = custom.createEl("button", { text: "Add" });
-    add.addEventListener("click", () => this.addColor(hex.value.trim() || picker.value));
-  }
-
-  private async save(): Promise<void> {
-    const extras: string[] = [];
-    const recolor = new Map<string, string>();
-    const keep = new Set<string>();
-    for (const entry of this.entries) {
-      const color = entry.color.toLowerCase();
-      keep.add(color);
-      if (!entry.added) continue;
-      extras.push(color);
-      if (entry.original && entry.original.toLowerCase() !== color) recolor.set(entry.original.toLowerCase(), color);
-    }
-    // Names of colors that left the palette and no highlight uses are dropped.
-    for (const key of Object.keys(this.draft)) {
-      if (!keep.has(key) && !this.usedColors.has(key)) delete this.draft[key];
-    }
-    try {
-      await this.onSave(this.draft, extras, recolor);
-      this.close();
-    } catch (error) {
-      console.error("Lumen could not save the highlight colors", error);
-      new Notice("Could not save the highlight colors.");
-    }
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
 }
 
 /** Choose the order of a sidecar note's color headings, then export. */

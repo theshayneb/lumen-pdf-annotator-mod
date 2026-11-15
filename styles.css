@@ -1153,57 +1153,8 @@
   width: 13px;
   height: 13px;
 }
-.lumod-color-names-swatch {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  margin-right: 8px;
-  border-radius: 4px;
-  vertical-align: -2px;
-  background: var(--mark-color);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1);
-}
 .lumod-color-row {
   flex-wrap: wrap;
-}
-.lumod-color-picker {
-  width: 32px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.lumod-add-color {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 0;
-  border-top: 1px solid var(--background-modifier-border);
-}
-.lumod-add-color-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.lumod-add-color-chip {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 6px;
-  background: var(--mark-color) !important;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
-}
-.lumod-add-color-custom {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.lumod-add-color-custom input[type="text"] {
-  width: 110px;
-}
-.lumod-color-names-help {
-  color: var(--text-muted);
 }
 .lumod-color-filter-count {
   color: var(--lumod-muted);
@@ -2325,4 +2276,71 @@
 .note-layout-order-move {
   min-width: 44px;
   min-height: 44px;
+}
+
+/* "Highlight colors" window, shared with ePub Reader (keep identical in both plugins). */
+.hl-colors-help {
+  margin-top: 0;
+  color: var(--text-muted);
+}
+.hl-colors-swatch {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-inline-end: var(--size-4-2, 8px);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  vertical-align: -2px;
+  background: var(--hl-color);
+}
+.hl-colors-picker {
+  width: 44px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  cursor: pointer;
+}
+.hl-colors-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2, 8px);
+  padding: var(--size-4-3, 12px) 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.hl-colors-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2, 8px);
+}
+.hl-colors-preset {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--hl-color);
+  box-shadow: none;
+}
+.hl-colors-preset:hover {
+  background: var(--hl-color);
+  border-color: var(--interactive-accent);
+}
+.hl-colors-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2, 8px);
+}
+.hl-colors-custom input[type="text"] {
+  width: 120px;
+}
+@media (pointer: coarse) {
+  .hl-colors-preset,
+  .hl-colors-picker {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
