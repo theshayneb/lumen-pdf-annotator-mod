@@ -1,6 +1,9 @@
 node_modules/
 dist/
-test/
+# Scratch files in test/ stay local; the test suites and their helpers are tracked.
+test/*
+!test/*.test.mjs
+!test/support/
 tmp/
 *.log
 .DS_Store

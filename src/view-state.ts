@@ -19,6 +19,8 @@ interface PluginDataWithViewState {
 }
 
 const SAVE_DELAY_MS = 450;
+/** Page and zoom are per device, kept in this device's local storage and never synced. */
+const LOCAL_KEY = "pdf-annotator:view-state";
 const MAX_ENTRIES = 2000;
 
 function stateKey(view: LumenPdfView, path: string): string {
@@ -28,7 +30,7 @@ function stateKey(view: LumenPdfView, path: string): string {
 }
 
 /**
- * Persists only lightweight reader state. It deliberately never touches the
+ * Remembers each PDF's page and zoom on this device. Persists only lightweight reader state. It deliberately never touches the
  * PDF renderer or annotation journal, so normal reading remains unaffected.
  */
 export class PdfViewStateManager {
@@ -39,17 +41,26 @@ export class PdfViewStateManager {
   private readonly pendingRestores = new WeakMap<HTMLElement, () => void>();
   private readonly activeCaptures = new Map<HTMLElement, () => void>();
 
-  constructor(
-    private readonly plugin: Plugin,
-    private readonly persist: (state: PdfViewStateData) => Promise<void>,
-  ) {}
+  private dirty = false;
 
+  constructor(private readonly plugin: Plugin) {}
+
+  /**
+   * Reads this device's saved positions. The first time, it starts from what
+   * 1.0.x kept in the synced data.json (read only, never written back).
+   */
   async load(): Promise<void> {
-    const loaded: unknown = await this.plugin.loadData() as unknown;
-    const data = typeof loaded === "object" && loaded !== null && !Array.isArray(loaded)
-      ? loaded as PluginDataWithViewState
-      : null;
-    const stored = data?.pdfViewState;
+    const local: unknown = this.plugin.app.loadLocalStorage(LOCAL_KEY);
+    let stored: Partial<PdfViewStateData> | undefined;
+    if (local && typeof local === "object" && !Array.isArray(local)) {
+      stored = local;
+    } else {
+      const loaded: unknown = await this.plugin.loadData() as unknown;
+      const data = typeof loaded === "object" && loaded !== null && !Array.isArray(loaded)
+        ? loaded as PluginDataWithViewState
+        : null;
+      stored = data?.pdfViewState;
+    }
     const pdfs = stored?.pdfs && typeof stored.pdfs === "object" ? stored.pdfs : {};
     this.data = { version: 1, pdfs };
   }
@@ -172,12 +183,18 @@ export class PdfViewStateManager {
     const page = Number.parseInt(root.querySelector<HTMLInputElement>(".lumod-page-input")?.value ?? "1", 10);
     const zoom = Number.parseInt(root.querySelector<HTMLElement>(".lumod-zoom-label")?.textContent ?? "125", 10) / 100;
     if (!Number.isFinite(page) || !Number.isFinite(zoom)) return;
-    this.data.pdfs[stateKey(view, path)] = {
+    const key = stateKey(view, path);
+    const next = {
       page: Math.max(1, page),
       zoom: Math.max(view.minimumZoom(), Math.min(4, zoom)),
       updatedAt: Date.now(),
       mobileFit: view.usesMobileFit() || undefined,
     };
+    const previous = this.data.pdfs[key];
+    // Nothing to save when the page and zoom haven't changed.
+    if (previous && previous.page === next.page && previous.zoom === next.zoom && previous.mobileFit === next.mobileFit) return;
+    this.data.pdfs[key] = next;
+    this.dirty = true;
     this.data.pdfs = Object.fromEntries(Object.entries(this.data.pdfs)
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
       .slice(0, MAX_ENTRIES));
@@ -193,7 +210,10 @@ export class PdfViewStateManager {
   }
 
   private async writeMergedData(): Promise<void> {
-    await this.persist({ version: 1, pdfs: { ...this.data.pdfs } });
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.plugin.app.saveLocalStorage(LOCAL_KEY, { version: 1, pdfs: { ...this.data.pdfs } });
+    await Promise.resolve();
   }
 
   async flush(): Promise<void> {

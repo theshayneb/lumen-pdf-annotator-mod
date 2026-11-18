@@ -1,5 +1,5 @@
 import { normalizePath, TFile } from "obsidian";
-import type { Vault } from "obsidian";
+import type { App, Vault } from "obsidian";
 import { annotationUri } from "./links";
 import { colorName, hasCustomColorName, orderColors } from "./model";
 import type { ColorNames } from "./model";
@@ -225,6 +225,25 @@ function relatedLinkTarget(frontmatter: string): string | null {
  * Finds notes linking to a PDF and resolves link text to files, so a sidecar
  * can be recognised after it is moved or after Obsidian shortens its link.
  */
+/** How sidecars are found through Obsidian's link index: notes linking the PDF, and resolving links. */
+export function sidecarLookupFor(app: App): SidecarLookup {
+  const cache = app.metadataCache;
+  return {
+    linkedFrom: pdf => {
+      const sources = new Set(Object.entries(cache.resolvedLinks)
+        .filter(([source, targets]) => source.endsWith(".md") && targets[pdf.path])
+        .map(([source]) => source));
+      // Links in properties, in case the link index leaves them out.
+      for (const note of app.vault.getMarkdownFiles()) {
+        const links = cache.getFileCache(note)?.frontmatterLinks;
+        if (links?.some(link => cache.getFirstLinkpathDest(link.link, note.path)?.path === pdf.path)) sources.add(note.path);
+      }
+      return Array.from(sources);
+    },
+    resolve: (link, sourcePath) => cache.getFirstLinkpathDest(link, sourcePath),
+  };
+}
+
 export interface SidecarLookup {
   /** Markdown notes that link to the PDF (frontmatter links included). */
   linkedFrom(pdf: TFile): string[];
@@ -325,6 +344,11 @@ export async function writeSidecar(vault: Vault, pdf: TFile, index: AnnotationIn
   const generated = await renderSidecarMarkdown(index, pdf, vault.getName(), layout, names, order);
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFile) {
+    // Nothing is written when the note already says this (no needless Sync traffic or merges).
+    const current = await vault.read(existing);
+    const currentNamed = (existing.parent?.isRoot() ?? true) && /^(.*?)(?: \d+)?$/.exec(existing.basename)?.[1] === pdf.basename;
+    if (ownsPdf(current, path, pdf, lookup, currentNamed || current.includes(SIDECAR_END_PREFIX))
+      && keptProperties(current, generated) + keptText(current) === current) return path;
     let changed = false;
     await vault.process(existing, content => {
       // Checked again in case the note changed since it was found.

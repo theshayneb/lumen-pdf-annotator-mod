@@ -2,7 +2,10 @@ import { FuzzySuggestModal, Modal, normalizePath, Notice, ObsidianProtocolData, 
 import type { SettingDefinitionItem } from "obsidian";
 import { LUMEN_PROTOCOL_ACTION } from "./links";
 import { disposePdfRuntime } from "./pdf-runtime";
-import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, migrateAreaImages, migrateStorageFolder, restoreBundle, verifyBundle } from "./storage";
+import { BackgroundTasks } from "./background";
+import { initDevice, runsBackgroundTasks, setRunsBackgroundTasks, syncStatusText } from "./device";
+import { AnnotationBundleInfo, BundleInfo, STORAGE_FOLDER, exportAnnotationBundle, listAnnotationBundles, listBundles, restoreBundle, verifyBundle } from "./storage";
+import { mergeSettings } from "./sync-merge";
 import { InterfaceTheme, LumenPdfView, LUMEN_VIEW_TYPE, PdfTheme } from "./view";
 import { PdfViewStateManager } from "./view-state";
 
@@ -48,27 +51,42 @@ function readSettings(value: unknown): LumenSettings {
   };
 }
 
+/** data.json key holding when each setting was last changed, on any device. */
+const SETTING_TIMES_KEY = "settingsUpdatedAt";
+
+function readSettingTimes(value: unknown): Record<string, number> {
+  const times = (value as Record<string, unknown> | null)?.[SETTING_TIMES_KEY];
+  if (!times || typeof times !== "object" || Array.isArray(times)) return {};
+  return Object.fromEntries(Object.entries(times as Record<string, unknown>)
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 interface ViewRegistryWithExtensions {
   typeByExtension: Record<string, string>;
 }
 
 export default class LumenPdfPlugin extends Plugin {
   settings: LumenSettings = DEFAULT_SETTINGS;
+  /** When each setting was last changed, on any device, so merges keep the latest. */
+  private settingTimes: Record<string, number> = {};
   private dataWrite: Promise<void> = Promise.resolve();
   private viewState!: PdfViewStateManager;
+  background!: BackgroundTasks;
 
   async onload(): Promise<void> {
-    this.settings = readSettings(await this.loadData() as unknown);
-    try {
-      await migrateStorageFolder(this.app.vault);
-    } catch (error) {
-      console.error("PDF Annotator could not move its storage folder", error);
-    }
-    this.app.workspace.onLayoutReady(() => {
-      migrateAreaImages(this.app.vault, (file, path) => this.app.fileManager.renameFile(file, path))
-        .catch(error => console.error("PDF Annotator could not move area pictures", error));
-    });
-    this.viewState = new PdfViewStateManager(this, state => this.saveMergedData({ pdfViewState: state }));
+    initDevice(this.app);
+    const data: unknown = await this.loadData() as unknown;
+    this.settings = readSettings(data);
+    this.settingTimes = readSettingTimes(data);
+    // Storage moves, sidecar updates and tidying happen only on the device that runs background tasks.
+    this.background = new BackgroundTasks(this, () => this.settings.sidecarAutoUpdate);
+    this.background.start();
+    this.app.workspace.onLayoutReady(() => void this.background.tick());
+    this.viewState = new PdfViewStateManager(this);
     await this.viewState.load();
     this.registerView(LUMEN_VIEW_TYPE, leaf => new LumenPdfView(
       leaf,
@@ -208,35 +226,72 @@ export default class LumenPdfPlugin extends Plugin {
   }
 
   async setPdfTheme(theme: PdfTheme): Promise<void> {
-    this.settings.pdfTheme = theme;
-    for (const leaf of this.app.workspace.getLeavesOfType(LUMEN_VIEW_TYPE)) {
-      if (leaf.view instanceof LumenPdfView) leaf.view.setTheme(theme);
-    }
-    await this.saveSettings();
+    await this.updateSetting("pdfTheme", theme);
   }
 
   async setInterfaceTheme(theme: InterfaceTheme): Promise<void> {
-    this.settings.interfaceTheme = theme;
+    await this.updateSetting("interfaceTheme", theme);
+  }
+
+  /** Applies a theme change, wherever it was made, to every open reader. */
+  private applySettingEffects(previous: LumenSettings): void {
     for (const leaf of this.app.workspace.getLeavesOfType(LUMEN_VIEW_TYPE)) {
-      if (leaf.view instanceof LumenPdfView) leaf.view.refreshInterfaceTheme();
+      if (!(leaf.view instanceof LumenPdfView)) continue;
+      if (previous.pdfTheme !== this.settings.pdfTheme) leaf.view.setTheme(this.settings.pdfTheme);
+      if (previous.interfaceTheme !== this.settings.interfaceTheme) leaf.view.refreshInterfaceTheme();
     }
-    await this.saveSettings();
   }
 
-  saveSettings(): Promise<void> {
-    return this.saveMergedData({ ...this.settings });
+  /** Changes one setting here and saves only that setting, stamped with when it was changed. */
+  async updateSetting<K extends keyof LumenSettings>(key: K, value: LumenSettings[K]): Promise<void> {
+    const previous = { ...this.settings };
+    this.settings = { ...this.settings, [key]: value };
+    this.settingTimes = { ...this.settingTimes, [key]: Date.now() };
+    this.applySettingEffects(previous);
+    await this.savePatch([key]);
   }
 
-  private saveMergedData(patch: Record<string, unknown>): Promise<void> {
+  /**
+   * Read, merge, then write: re-reads data.json and changes only `keys` in it,
+   * so settings another device changed are never overwritten with this
+   * device's older copy. Nothing is written when nothing would change.
+   */
+  private savePatch(keys: Array<keyof LumenSettings>): Promise<void> {
     const write = this.dataWrite.catch(() => undefined).then(async () => {
-      const loaded: unknown = await this.loadData() as unknown;
-      const existing = typeof loaded === "object" && loaded !== null && !Array.isArray(loaded)
-        ? loaded as Record<string, unknown>
-        : {};
-      await this.saveData({ ...existing, ...patch });
+      const disk = asRecord(await this.loadData() as unknown);
+      const diskTimes = readSettingTimes(disk);
+      const next: Record<string, unknown> = { ...disk };
+      const times = { ...diskTimes };
+      for (const key of keys) {
+        if ((diskTimes[key] ?? 0) > (this.settingTimes[key] ?? 0)) continue;
+        next[key] = this.settings[key];
+        times[key] = this.settingTimes[key] ?? 0;
+      }
+      next[SETTING_TIMES_KEY] = times;
+      if (JSON.stringify(next) !== JSON.stringify(disk)) await this.saveData(next);
     });
     this.dataWrite = write;
     return write;
+  }
+
+  /**
+   * Another device's settings arrived through Sync: merge them with this
+   * device's, setting by setting, keeping whichever was changed last. Saves
+   * only if this device holds a newer change that disk lacks.
+   */
+  async onExternalSettingsChange(): Promise<void> {
+    await this.dataWrite.catch(() => undefined);
+    const disk = asRecord(await this.loadData() as unknown);
+    const diskSettings = readSettings(disk);
+    const diskTimes = readSettingTimes(disk);
+    const merged = mergeSettings({ ...this.settings }, this.settingTimes, diskSettings as unknown as Record<string, unknown>, diskTimes);
+    const previous = { ...this.settings };
+    this.settings = readSettings(merged.values);
+    this.settingTimes = merged.times;
+    this.applySettingEffects(previous);
+    const newerHere = (Object.keys(DEFAULT_SETTINGS) as Array<keyof LumenSettings>)
+      .filter(key => JSON.stringify(this.settings[key]) !== JSON.stringify(diskSettings[key]));
+    if (newerHere.length) await this.savePatch(newerHere);
   }
 
   private async verifyAllBackups(): Promise<void> {
@@ -301,6 +356,25 @@ class LumenSettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       {
+        type: "group",
+        heading: "This device",
+        items: [
+          {
+            name: "Run background tasks on this device",
+            desc: "Keeps sidecar notes up to date and tidies annotation storage. Turn this on for one always-on computer and off on phones and tablets. Saved on this device only, never synced. Default: on for desktop, off for mobile.",
+            control: { type: "toggle", key: "backgroundTasks", defaultValue: Platform.isDesktopApp },
+          },
+          {
+            name: "Background status",
+            render: setting => {
+              const last = this.plugin.background.lastRun();
+              const when = last ? `last run ${new Date(last).toLocaleString()}` : "not run yet on this device";
+              setting.setDesc(runsBackgroundTasks() ? `Status: ${syncStatusText()} · ${when}` : "Off on this device. Your changes here are saved and merged by the device that runs background tasks.");
+            },
+          },
+        ],
+      },
+      {
         name: "Make PDF Annotator the default PDF viewer",
         desc: "Open PDFs in PDF Annotator after the next Obsidian restart.",
         control: { type: "toggle", key: "defaultViewer", defaultValue: DEFAULT_SETTINGS.defaultViewer },
@@ -327,12 +401,12 @@ class LumenSettingTab extends PluginSettingTab {
       },
       {
         name: "Create automatic PDF recovery copies",
-        desc: "Copy each opened PDF into PDF Annotator's recovery storage in the background. Keep this off for the smoothest large-PDF and cloud-vault performance.",
+        desc: "Copy each opened PDF into PDF Annotator's recovery storage in the background. Only the device that runs background tasks makes copies. Keep this off for the smoothest large-PDF and cloud-vault performance.",
         control: { type: "toggle", key: "automaticPdfBackups", defaultValue: DEFAULT_SETTINGS.automaticPdfBackups },
       },
       {
         name: "Keep exported sidecar notes up to date",
-        desc: "Once a PDF's sidecar note has been exported, rewrite it automatically a moment after each annotation change, using the heading order you chose. PDFs without a sidecar are left alone. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept.",
+        desc: "Once a PDF's sidecar note has been exported, rewrite it automatically a moment after each annotation change, using the heading order you chose. PDFs without a sidecar are left alone. Notes you did not create with this plugin are never overwritten, and text below the sidecar's end marker is kept. Updates are written by the device that runs background tasks, so notes change only after your edits reach it. Exporting by hand works on any device.",
         control: { type: "toggle", key: "sidecarAutoUpdate", defaultValue: DEFAULT_SETTINGS.sidecarAutoUpdate },
       },
       {
@@ -346,6 +420,7 @@ class LumenSettingTab extends PluginSettingTab {
   }
 
   getControlValue(key: string): unknown {
+    if (key === "backgroundTasks") return runsBackgroundTasks();
     if (key === "defaultViewer") return this.plugin.settings.defaultViewer;
     if (key === "pdfTheme") return this.plugin.settings.pdfTheme;
     if (key === "interfaceTheme") return this.plugin.settings.interfaceTheme;
@@ -357,29 +432,29 @@ class LumenSettingTab extends PluginSettingTab {
   }
 
   setControlValue(key: string, value: unknown): void | Promise<void> {
+    if (key === "backgroundTasks" && typeof value === "boolean") {
+      setRunsBackgroundTasks(value);
+      if (value) void this.plugin.background.tick();
+      return;
+    }
     if (key === "defaultViewer" && typeof value === "boolean") {
-      this.plugin.settings.defaultViewer = value;
-      return this.plugin.saveSettings().then(() => {
+      return this.plugin.updateSetting("defaultViewer", value).then(() => {
         new Notice("Restart Obsidian to apply the PDF viewer change.");
       });
     }
     if (key === "pdfTheme" && isPdfTheme(value)) return this.plugin.setPdfTheme(value);
     if (key === "interfaceTheme" && isInterfaceTheme(value)) return this.plugin.setInterfaceTheme(value);
     if (key === "openAnnotationsPanel" && typeof value === "boolean") {
-      this.plugin.settings.openAnnotationsPanel = value;
-      return this.plugin.saveSettings();
+      return this.plugin.updateSetting("openAnnotationsPanel", value);
     }
     if (key === "legacyAnnotationFolder" && typeof value === "string") {
-      this.plugin.settings.legacyAnnotationFolder = value.trim().replace(/^\/+|\/+$/g, "") || "PDF annotations";
-      return this.plugin.saveSettings();
+      return this.plugin.updateSetting("legacyAnnotationFolder", value.trim().replace(/^\/+|\/+$/g, "") || "PDF annotations");
     }
     if (key === "automaticPdfBackups" && typeof value === "boolean") {
-      this.plugin.settings.automaticPdfBackups = value;
-      return this.plugin.saveSettings();
+      return this.plugin.updateSetting("automaticPdfBackups", value);
     }
     if (key === "sidecarAutoUpdate" && typeof value === "boolean") {
-      this.plugin.settings.sidecarAutoUpdate = value;
-      return this.plugin.saveSettings();
+      return this.plugin.updateSetting("sidecarAutoUpdate", value);
     }
   }
 }

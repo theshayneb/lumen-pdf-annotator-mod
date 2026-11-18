@@ -1,6 +1,6 @@
 {
   "name": "lumen-pdf-annotator-mod",
-  "version": "1.0.48",
+  "version": "1.1.0",
   "private": true,
   "description": "Fork of Lumen PDF Annotator with colour views and sidecar Markdown export.",
   "repository": {
@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test:outline": "node --test test/outline-accuracy.test.mjs",
     "lint": "eslint .",
-    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production"
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "node --test test/sync-merge.test.mjs test/storage-sync.test.mjs test/outline-accuracy.test.mjs"
   },
   "keywords": [
     "obsidian-plugin"

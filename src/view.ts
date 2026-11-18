@@ -15,7 +15,8 @@ import {
   ResolvedOutlineEntry,
   resolvePdfOutline,
 } from "./outline";
-import { existingSidecarPath, SidecarConflictError, SidecarLookup, sidecarLayout, writeSidecar } from "./annotation-export";
+import { existingSidecarPath, SidecarConflictError, SidecarLookup, sidecarLayout, sidecarLookupFor, writeSidecar } from "./annotation-export";
+import { runsBackgroundTasks, syncSettled } from "./device";
 import { chooseColorOrder, chooseNoteLayout, NoteLayout } from "./note-layout";
 import { HighlightColorsModal } from "./highlight-colors";
 import { AnnotationFilters, DEFAULT_FILTERS, FilterBar, isUnfiltered, matchesDate } from "./annotation-filters";
@@ -276,6 +277,8 @@ export interface SidecarOptions {
 }
 
 const SIDECAR_SYNC_DELAY = 1_500;
+/** How long to wait before looking again while Sync is still busy. */
+const SIDECAR_SETTLE_RETRY = 60_000;
 
 export class LumenPdfView extends FileView {
   private readonly mobileRuntime = Platform.isMobile;
@@ -545,10 +548,11 @@ export class LumenPdfView extends FileView {
     let noteLayout: NoteLayout | null = null;
     let extraColors: string[] = [];
     try {
-      colorNames = await bundle.repository.loadColorNames();
-      colorOrder = await bundle.repository.loadColorOrder();
-      noteLayout = await bundle.repository.loadNoteLayout();
-      extraColors = await bundle.repository.loadExtraColors();
+      const palette = await bundle.repository.loadPalette();
+      colorNames = palette.names;
+      colorOrder = palette.order;
+      noteLayout = palette.layout;
+      extraColors = palette.extras;
     } catch (error) { console.error("Lumen could not load color names", error); }
     if (generation !== this.documentGeneration) return;
     this.bundle = bundle;
@@ -746,10 +750,9 @@ export class LumenPdfView extends FileView {
       this.scheduleExternalReload();
       return;
     }
-    const reader = new AnnotationRepository(this.app.vault, bundle.folder, bundle.hash, file.path);
-    const [loaded, names, extras, order, layout] = await Promise.all([
-      reader.load(), reader.loadColorNames(), reader.loadExtraColors(), reader.loadColorOrder(), reader.loadNoteLayout(),
-    ]);
+    // Every device's files, merged by edit time with what this device has, so a
+    // stale copy arriving late can't undo anything.
+    const [loaded, { names, extras, order, layout }] = await Promise.all([bundle.repository.load(), bundle.repository.loadPalette()]);
     if (bundle !== this.bundle || bundle.repository.hasPendingWrites) return;
     const fingerprint = (index: AnnotationIndex) => index.all()
       .map(item => `${item.id}\u0000${item.updatedAt}\u0000${item.color}\u0000${item.style}\u0000${item.note}\u0000${item.tags.join(",")}\u0000${item.groupId ?? ""}`)
@@ -801,21 +804,7 @@ export class LumenPdfView extends FileView {
 
   /** Lets the sidecar be found after it is moved or its PDF link is shortened. */
   private sidecarLookup(): SidecarLookup {
-    const cache = this.app.metadataCache;
-    return {
-      linkedFrom: pdf => {
-        const sources = new Set(Object.entries(cache.resolvedLinks)
-          .filter(([source, targets]) => source.endsWith(".md") && targets[pdf.path])
-          .map(([source]) => source));
-        // Links in properties, in case the link index leaves them out.
-        for (const note of this.app.vault.getMarkdownFiles()) {
-          const links = cache.getFileCache(note)?.frontmatterLinks;
-          if (links?.some(link => cache.getFirstLinkpathDest(link.link, note.path)?.path === pdf.path)) sources.add(note.path);
-        }
-        return Array.from(sources);
-      },
-      resolve: (link, sourcePath) => cache.getFirstLinkpathDest(link, sourcePath),
-    };
+    return sidecarLookupFor(this.app);
   }
 
   /** Show the sidecar note: focus its tab if it is already open, else open it in a new tab. */
@@ -922,14 +911,23 @@ export class LumenPdfView extends FileView {
     });
   }
 
-  private scheduleSidecarSync(): void {
-    if (!this.sidecarOptions().autoSync) return;
+  /**
+   * Automatic sidecar updates are background work: only the device that runs
+   * background tasks does them, once Sync has gone quiet. Other devices'
+   * changes reach the sidecar when they reach that device.
+   */
+  private scheduleSidecarSync(delay = SIDECAR_SYNC_DELAY): void {
+    if (!this.sidecarOptions().autoSync || !runsBackgroundTasks()) return;
     window.clearTimeout(this.sidecarTimer);
-    this.sidecarTimer = window.setTimeout(() => void this.syncSidecar(), SIDECAR_SYNC_DELAY);
+    this.sidecarTimer = window.setTimeout(() => {
+      if (!syncSettled()) this.scheduleSidecarSync(SIDECAR_SETTLE_RETRY);
+      else void this.syncSidecar();
+    }, delay);
   }
 
   /** Rewrites the sidecar after a change, but only once it has been exported. */
   private async syncSidecar(): Promise<void> {
+    this.sidecarTimer = 0;
     try {
       if (!this.bundleFile || !(await existingSidecarPath(this.app.vault, this.bundleFile, this.sidecarLookup()))) return;
       await this.exportSidecar();
@@ -4530,7 +4528,12 @@ export class LumenPdfView extends FileView {
     this.closeSelectionPalette();
     this.finishExtension();
     this.closeEditor();
-    if (this.sidecarTimer) await this.syncSidecar();
+    // An update still waiting for Sync is left to the background sweep, which sees this PDF's changed journal.
+    if (this.sidecarTimer) {
+      window.clearTimeout(this.sidecarTimer);
+      if (syncSettled()) await this.syncSidecar();
+      this.sidecarTimer = 0;
+    }
     if (this.bundle) {
       this.bundle.repository.onChange = null;
       try {

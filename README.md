@@ -87,15 +87,23 @@ Utilities/PDF Annotator/
     sha256/
       <document-hash>/
         manifest.json
-        annotations.snapshot.json
-        annotations.snapshot.previous.json
+        journal.<device>.jsonl          # each device's own changes
+        palette.<device>.json           # each device's color names, added colors, heading order, layout
+        annotations.snapshot.v2.json    # compacted by the device that runs background tasks
+        annotations.snapshot.json       # older versions' files, still read, never rewritten
         annotations.journal.jsonl
         document.pdf  # only when automatic recovery copies are enabled
-  file-index/
-    <path-key>.json
 ```
 
-The append-only JSONL journal protects recent changes between checkpoints, while the previous compact snapshot provides a recovery fallback. The export command creates a readable Markdown representation whenever you want one. Existing Markdown snapshots remain supported as migration and corruption fallbacks. Because identity comes from PDF content, annotations remain associated when the original file is renamed or moved.
+### Several devices with Obsidian Sync
+
+Obsidian Sync keeps only the newest copy of a JSON file, so no file here is shared by two devices: each device appends only to its own `journal.<device>.jsonl` and `palette.<device>.json`. Reading merges every device's files by **when each edit was made**, not when the file arrived, so a phone or tablet that was offline for days can't undo newer edits from another device. Deleted highlights are remembered, so an old copy can't bring them back.
+
+**Run background tasks on this device** (Settings → This device; saved on the device, never synced) is on for desktop and off for phones and tablets by default. Only that device, and only once Sync has gone quiet, compacts each PDF's journals into its snapshot, rewrites exported sidecar notes after changes from any device arrive (including for PDFs that aren't open), makes recovery copies, and tidies up after older versions. Phones and tablets only save what you do; exporting a sidecar by hand still works there. Each PDF's page and zoom, and the PDF hash cache, are kept on each device, never in the vault. Opening and reading a PDF writes nothing.
+
+Settings are saved one at a time with when each was changed, and settings arriving from another device are merged, setting by setting, keeping the latest.
+
+Existing Markdown snapshots remain supported as migration and corruption fallbacks. Because identity comes from PDF content, annotations remain associated when the original file is renamed or moved.
 
 Everything stays in the vault: no account, telemetry, remote processing, CDN scripts, or dynamic code loading.
 
@@ -151,7 +159,7 @@ Previous page, next page, page-note placement, annotation checkpoint, export, le
 ### Backup, export, and migration commands
 
 - **Export annotations for this PDF** writes a readable Markdown file under `Utilities/PDF Annotator/exports/`. In **Settings → Lumen PDF Annotator → Export annotations**, choose individual annotated PDFs or select all filtered matches and export them together. Each PDF gets a separate, uniquely named Markdown note with the source PDF path, page headings, quoted highlight text, attached notes, tags, and links back to the exact annotation. Multi-page highlights stay grouped with their one associated note. Exports do not include raw recovery JSON and do not change the source PDFs.
-- **Save an annotation checkpoint** immediately compacts the journal into a snapshot.
+- **Save an annotation checkpoint** saves this device's recent changes; on the device that runs background tasks it also compacts every device's journals into the snapshot.
 - **Verify all PDF backup checksums** checks every local backup against its SHA-256 identity.
 - **Restore a backed-up PDF** verifies the checksum before creating a non-destructive copy under `Utilities/PDF Annotator/recovered/`.
 - **Import legacy annotations for this PDF** explicitly imports compatible user-owned annotation data when present and uses stable IDs to prevent duplicates. Lumen does not scan every Markdown note when a PDF opens.

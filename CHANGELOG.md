@@ -2,6 +2,29 @@
 
 All notable changes to PDF Annotator (formerly Lumen PDF Annotator Mod) are documented here. Entries from 1.0.19 and earlier come from the upstream Lumen PDF Annotator.
 
+## 1.1.0 — 2026-11-18
+
+**Safe with Obsidian Sync across several devices.** Update every device: see the end of this entry.
+
+- **No more lost annotations between devices.** Obsidian Sync keeps only the newest copy of a JSON file, so a tablet syncing days later could wipe newer highlights (or lose its own). Now each device writes only its own files (`journal.<device>.jsonl` for annotations, `palette.<device>.json` for color names, added colors, heading order and note layout), and everything is merged when read, by when each edit was made. A stale copy can't undo a newer edit, and deleted highlights stay deleted.
+- **New setting: Run background tasks on this device** (Settings → This device). It's saved on the device itself, never synced, and is on for desktop and off for phones and tablets by default. Only that device, and only once Sync has been quiet for a minute:
+  - compacts each PDF's journals into one snapshot;
+  - keeps exported sidecar notes up to date, including for PDFs that aren't open when another device's changes arrive;
+  - makes recovery copies;
+  - finishes older versions' storage moves.
+
+  Phones and tablets only save what you do. **Export to sidecar** by hand still works on any device.
+- **Settings** are saved one at a time, stamped with when they changed, and settings arriving from another device are merged, keeping the latest change of each.
+- **Page and zoom** are remembered on each device, no longer in the synced settings file, and nothing is saved while you only read. The PDF hash cache moved out of the vault into each device's own storage. The old `Utilities/PDF Annotator/file-index` folder goes to the trash once no device has written to it for 30 days.
+- **Nothing is written just by opening or reading a PDF**, and sidecar notes, snapshots and palette files are rewritten only when their content actually changes.
+- **Upgrading keeps everything.** Files written by 1.0.x are still read, and never rewritten or deleted.
+- **Every device must update.** A device still on 1.0.x:
+  - doesn't see highlights made on updated devices;
+  - may still rewrite sidecar notes from its own copy;
+  - has its color name changes ignored where an updated device changed the same color.
+
+  Its new highlights and edits are still merged.
+
 ## 1.0.48 — 2026-11-15
 
 - The Annotations panel's color chips and Colors button keep their outline-free look in the filter bar shared with ePub Reader (which now looks the same).

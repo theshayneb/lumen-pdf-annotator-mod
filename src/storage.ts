@@ -1,12 +1,16 @@
 import { normalizePath, TFile, TFolder, Vault } from "obsidian";
 import { isNoteLayout, NoteLayout } from "./note-layout";
-import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MarkStyle, normalizeColorNames, normalizeColorOrder, normalizeExtraColors, PdfAnnotation } from "./model";
+import { AnnotationIndex, AnnotationMutation, ColorNames, MARK_COLORS, MAX_EXTRA_COLORS, MarkStyle, normalizeColorNames, normalizeColorOrder, normalizeExtraColors, PdfAnnotation } from "./model";
 import { writeAnnotationExport } from "./annotation-export";
+import { cachedFileHash, currentDeviceId, rememberFileHash, runsBackgroundTasks } from "./device";
+import { AnnotationMerge, emptyPalette, JournalEntry, mergePalettes, PaletteFile, PaletteView, paletteView, readPaletteFile, recordPaletteEdit, serializePalette, serializeSnapshot, SnapshotV2, trimmableEntries } from "./sync-merge";
 
 export const STORAGE_FOLDER = "Utilities/PDF Annotator";
 // Used by 1.0.5–1.0.22. Its contents are moved into STORAGE_FOLDER on load.
 const PREVIOUS_STORAGE_FOLDER = "Dashboard";
 const ROOT = `${STORAGE_FOLDER}/bundles/sha256`;
+/** Where each PDF's annotation folder lives, named by the PDF's SHA-256. */
+export const BUNDLE_ROOT = ROOT;
 const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
 // Earlier storage locations, newest first: the previous folder (for anything
 // the move could not handle), this fork's 1.0.0–1.0.4 folder, and the original
@@ -15,7 +19,8 @@ const LEGACY_ROOT = ".pdf-annotator/bundles/sha256";
 const PREVIOUS_ROOTS = [`${PREVIOUS_STORAGE_FOLDER}/bundles/sha256`, ".lumen-pdf-mod/bundles/sha256", ".lumen-pdf/bundles/sha256"];
 // Previous roots that may still hold bundles nobody has reopened yet.
 const UNMIGRATED_ROOTS = PREVIOUS_ROOTS.slice(0, 2);
-const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
+/** Where 1.0.x kept each device's PDF hash cache, in the synced vault. Now kept on each device instead. */
+export const FILE_INDEX_ROOT = `${STORAGE_FOLDER}/file-index`;
 // Per-PDF colour names. They live in the PDF's bundle, so they follow the PDF
 // (by content) and never apply to other PDFs.
 const COLOR_NAMES_FILE = "color-names.json";
@@ -86,42 +91,12 @@ export async function sha256(bytes: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function stablePathKey(path: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < path.length; index++) {
-    hash ^= path.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${(hash >>> 0).toString(36)}-${path.length.toString(36)}`;
-}
-
-async function documentHash(vault: Vault, file: TFile, bytes: ArrayBuffer): Promise<string> {
-  await ensureFolder(vault, FILE_INDEX_ROOT);
-  const cachePath = `${FILE_INDEX_ROOT}/${stablePathKey(file.path)}.json`;
-  if (await vault.adapter.exists(cachePath)) {
-    try {
-      const cached = JSON.parse(await vault.adapter.read(cachePath)) as {
-        path?: unknown;
-        mtime?: unknown;
-        size?: unknown;
-        hash?: unknown;
-      };
-      if (cached.path === file.path
-        && cached.mtime === file.stat.mtime
-        && cached.size === file.stat.size
-        && typeof cached.hash === "string"
-        && /^[a-f0-9]{64}$/.test(cached.hash)) {
-        return cached.hash;
-      }
-    } catch { /* recompute invalid cache entries */ }
-  }
+/** The PDF's content hash, remembered on this device so unchanged PDFs aren't hashed again. */
+async function documentHash(file: TFile, bytes: ArrayBuffer): Promise<string> {
+  const cached = cachedFileHash(file.path, file.stat.mtime, file.stat.size);
+  if (cached) return cached;
   const hash = await sha256(bytes);
-  await vault.adapter.write(cachePath, JSON.stringify({
-    path: file.path,
-    mtime: file.stat.mtime,
-    size: file.stat.size,
-    hash,
-  }));
+  rememberFileHash(file.path, file.stat.mtime, file.stat.size, hash);
   return hash;
 }
 
@@ -225,16 +200,6 @@ async function readJsonSnapshot(json: string): Promise<PdfAnnotation[] | null> {
   }
 }
 
-async function compactSnapshot(annotations: PdfAnnotation[]): Promise<string> {
-  const chunks = ["["];
-  for (let index = 0; index < annotations.length; index++) {
-    chunks.push(`${JSON.stringify(annotations[index])}${index + 1 < annotations.length ? "," : ""}`);
-    if (index > 0 && index % 1_000 === 0) await yieldToHost();
-  }
-  chunks.push("]");
-  return chunks.join("");
-}
-
 function isMarkStyle(value: unknown): value is MarkStyle {
   return value === "highlight" || value === "underline" || value === "dashed" || value === "dotted"
     || value === "strike" || value === "box" || value === "comment";
@@ -277,7 +242,8 @@ function normalizeAnnotation(value: unknown): PdfAnnotation | null {
     const textRects = rects.filter(rect => !(rect.width >= 0.95 && rect.height >= 0.9));
     if (textRects.length) rects.splice(0, rects.length, ...textRects);
   }
-  const createdAt = finite(item.createdAt, Date.now());
+  // No clock fallback: the same record must read the same on every device and every load.
+  const createdAt = finite(item.createdAt, 0);
   const style = isMarkStyle(item.style) ? item.style : "highlight";
   return {
     id: item.id,
@@ -303,17 +269,74 @@ function normalizeMutation(value: unknown): AnnotationMutation | null {
     return annotation ? { op: "put", annotation } : null;
   }
   if (item.op === "remove" && typeof item.id === "string") {
-    return { op: "remove", id: item.id, at: finite(item.at, Date.now()) };
+    // Every version writes a time; an undated removal never outranks a dated edit.
+    return { op: "remove", id: item.id, at: finite(item.at, 0) };
   }
   return null;
 }
 
+/** The compacted snapshot, written only by the device that runs background tasks. */
+const SNAPSHOT_V2_FILE = "annotations.snapshot.v2.json";
+/** Each device's own journal and palette edits; only that device writes them. */
+const DEVICE_JOURNAL = /^journal\.([a-z0-9-]+)\.jsonl$/;
+const DEVICE_PALETTE = /^palette\.([a-z0-9-]+)\.json$/;
+/** A device rewrites its journal to drop compacted lines only once this many can go. */
+const TRIM_THRESHOLD = 200;
+
+/** Whether a file in a PDF's annotation folder holds annotations or palette edits (any version's). */
+export function isAnnotationDataFile(name: string): boolean {
+  return DEVICE_JOURNAL.test(name) || DEVICE_PALETTE.test(name) || name === SNAPSHOT_V2_FILE
+    || ANNOTATION_FILES.includes(name) || [COLOR_NAMES_FILE, COLOR_ORDER_FILE, NOTE_LAYOUT_FILE, EXTRA_COLORS_FILE].includes(name);
+}
+
+function parseJournal(text: string): JournalEntry[] {
+  const entries: JournalEntry[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const mutation = normalizeMutation(JSON.parse(line));
+      if (mutation) entries.push(mutation);
+    } catch { /* a torn or damaged line is skipped; the others still load */ }
+  }
+  return entries;
+}
+
+function readSnapshotV2(text: string, into: AnnotationMerge): boolean {
+  try {
+    const value = JSON.parse(text) as Partial<SnapshotV2> | null;
+    if (!value || value.version !== 2 || !Array.isArray(value.annotations)) return false;
+    for (const item of value.annotations) {
+      const annotation = normalizeAnnotation(item);
+      if (annotation) into.apply({ op: "put", annotation });
+    }
+    for (const [id, at] of Object.entries(value.tombstones ?? {})) {
+      if (typeof at === "number" && Number.isFinite(at)) into.apply({ op: "remove", id, at });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A PDF's annotations and palette, shared by every device through the vault.
+ *
+ * Each device appends its changes only to its own `journal.<device>.jsonl`
+ * and records palette edits only in its own `palette.<device>.json`, so Obsidian
+ * Sync's "newest copy wins" for these files can never drop another device's
+ * work. Reading merges every device's files, the background device's compacted
+ * snapshot and the files older versions wrote, by when each edit was made.
+ */
 export class AnnotationRepository {
-  private readonly snapshotPath: string;
-  private readonly previousPath: string;
+  private readonly folder: string;
+  private readonly legacySnapshotPath: string;
+  private readonly legacyPreviousPath: string;
   private readonly compactSnapshotPath: string;
   private readonly compactPreviousPath: string;
+  private readonly legacyJournalPath: string;
+  private readonly snapshotPath: string;
   private readonly journalPath: string;
+  private readonly palettePath: string;
   private readonly colorNamesPath: string;
   private readonly colorOrderPath: string;
   private readonly noteLayoutPath: string;
@@ -321,7 +344,8 @@ export class AnnotationRepository {
   private readonly queued = new Map<string, AnnotationMutation>();
   private flushTimer: number | null = null;
   private flushing: Promise<void> | null = null;
-  private dirty = false;
+  /** Everything known, with deletions, as of the last load plus changes made here since. */
+  private merged = new AnnotationMerge();
   /** Called after every queued mutation, e.g. to keep a sidecar note in sync. */
   onChange: (() => void) | null = null;
 
@@ -330,73 +354,86 @@ export class AnnotationRepository {
     folder: string,
     private readonly hash: string,
     private readonly pdfPath: string,
+    /** Called before the first write, to make the folder and manifest. */
+    private readonly prepareForWrite: () => Promise<void> = () => ensureFolder(vault, folder),
   ) {
-    this.snapshotPath = `${folder}/annotations.md`;
-    this.previousPath = `${folder}/annotations.previous.md`;
+    this.folder = folder;
+    this.legacySnapshotPath = `${folder}/annotations.md`;
+    this.legacyPreviousPath = `${folder}/annotations.previous.md`;
     this.compactSnapshotPath = `${folder}/annotations.snapshot.json`;
     this.compactPreviousPath = `${folder}/annotations.snapshot.previous.json`;
-    this.journalPath = `${folder}/annotations.journal.jsonl`;
+    this.legacyJournalPath = `${folder}/annotations.journal.jsonl`;
+    this.snapshotPath = `${folder}/${SNAPSHOT_V2_FILE}`;
+    const device = currentDeviceId();
+    this.journalPath = `${folder}/journal.${device}.jsonl`;
+    this.palettePath = `${folder}/palette.${device}.json`;
     this.colorNamesPath = `${folder}/${COLOR_NAMES_FILE}`;
     this.colorOrderPath = `${folder}/${COLOR_ORDER_FILE}`;
     this.noteLayoutPath = `${folder}/${NOTE_LAYOUT_FILE}`;
     this.extraColorsPath = `${folder}/${EXTRA_COLORS_FILE}`;
   }
 
+  private async readIfExists(path: string): Promise<string | null> {
+    return await this.vault.adapter.exists(path) ? this.vault.adapter.read(path) : null;
+  }
+
+  /** Names of the files in this PDF's folder. */
+  private async folderFiles(): Promise<string[]> {
+    if (!(await this.vault.adapter.exists(this.folder))) return [];
+    return (await this.vault.adapter.list(this.folder)).files.map(path => path.split("/").at(-1) ?? "");
+  }
+
+  /** Merges everything on disk: older versions' files, the compacted snapshot, and every device's journal. */
+  private async readMerged(): Promise<AnnotationMerge> {
+    const merge = new AnnotationMerge();
+    const apply = async (annotations: PdfAnnotation[]) => {
+      for (let item = 0; item < annotations.length; item++) {
+        merge.apply({ op: "put", annotation: annotations[item] });
+        if (item > 0 && item % 1_000 === 0) await yieldToHost();
+      }
+    };
+    // Snapshots written by 1.0.x, newest format first. They hold no deletion
+    // times, so anything deleted since is removed again by the journals' records.
+    let legacy: PdfAnnotation[] | null = null;
+    for (const path of [this.compactSnapshotPath, this.compactPreviousPath]) {
+      const text = await this.readIfExists(path);
+      if (text !== null) legacy = await readJsonSnapshot(text);
+      if (legacy) break;
+    }
+    if (!legacy) {
+      for (const path of [this.legacySnapshotPath, this.legacyPreviousPath]) {
+        const text = await this.readIfExists(path);
+        if (text !== null) {
+          legacy = await readSnapshot(text);
+          break;
+        }
+      }
+    }
+    if (legacy) await apply(legacy);
+    const snapshot = await this.readIfExists(this.snapshotPath);
+    if (snapshot !== null) readSnapshotV2(snapshot, merge);
+    const journals = [this.legacyJournalPath, ...(await this.folderFiles()).filter(name => DEVICE_JOURNAL.test(name)).map(name => `${this.folder}/${name}`)];
+    for (const path of journals) {
+      const text = await this.readIfExists(path);
+      if (text === null) continue;
+      const entries = parseJournal(text);
+      for (let line = 0; line < entries.length; line++) {
+        merge.apply(entries[line]);
+        if (line > 0 && line % 1_000 === 0) await yieldToHost();
+      }
+    }
+    return merge;
+  }
+
   async load(): Promise<AnnotationIndex> {
+    this.merged = await this.readMerged();
+    // Changes made here that are not on disk yet stay.
+    for (const mutation of this.queued.values()) this.merged.apply(mutation);
     const index = new AnnotationIndex();
-    let snapshot: PdfAnnotation[] = [];
-    let preserveLegacyOrder = false;
-    let loadedSnapshot = false;
-    if (await this.vault.adapter.exists(this.compactSnapshotPath)) {
-      const primary = await readJsonSnapshot(await this.vault.adapter.read(this.compactSnapshotPath));
-      if (primary) {
-        snapshot = primary;
-        loadedSnapshot = true;
-      } else {
-        this.dirty = true;
-      }
-    }
-    if (!loadedSnapshot && await this.vault.adapter.exists(this.compactPreviousPath)) {
-      const previous = await readJsonSnapshot(await this.vault.adapter.read(this.compactPreviousPath));
-      if (previous) {
-        snapshot = previous;
-        loadedSnapshot = true;
-      }
-      this.dirty = true;
-    }
-    if (!loadedSnapshot && await this.vault.adapter.exists(this.snapshotPath)) {
-      snapshot = await readSnapshot(await this.vault.adapter.read(this.snapshotPath));
-      preserveLegacyOrder = true;
-      loadedSnapshot = true;
-      this.dirty = true;
-    } else if (!loadedSnapshot && await this.vault.adapter.exists(this.previousPath)) {
-      snapshot = await readSnapshot(await this.vault.adapter.read(this.previousPath));
-      preserveLegacyOrder = true;
-      loadedSnapshot = true;
-      this.dirty = true;
-    }
-    // Older snapshots were page-ordered. Normalizing once at load preserves
-    // the index's O(n) newest/oldest inspector paths from then on.
-    if (preserveLegacyOrder) {
-      snapshot.sort((a, b) => a.updatedAt - b.updatedAt || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    }
-    for (let item = 0; item < snapshot.length; item++) {
-      index.put(snapshot[item]);
+    const annotations = this.merged.sorted();
+    for (let item = 0; item < annotations.length; item++) {
+      index.put(annotations[item]);
       if (item > 0 && item % 1_000 === 0) await yieldToHost();
-    }
-    if (await this.vault.adapter.exists(this.journalPath)) {
-      const lines = (await this.vault.adapter.read(this.journalPath)).split("\n");
-      for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-        const line = lines[lineNumber];
-        if (!line.trim()) continue;
-        try {
-          const mutation = normalizeMutation(JSON.parse(line));
-          if (!mutation) continue;
-          index.apply(mutation);
-          this.dirty = true;
-        } catch { /* retain recoverable lines */ }
-        if (lineNumber > 0 && lineNumber % 1_000 === 0) await yieldToHost();
-      }
     }
     return index;
   }
@@ -404,7 +441,7 @@ export class AnnotationRepository {
   queue(mutation: AnnotationMutation): void {
     const key = mutation.op === "put" ? mutation.annotation.id : mutation.id;
     this.queued.set(key, mutation);
-    this.dirty = true;
+    this.merged.apply(mutation);
     this.onChange?.();
     if (this.flushTimer !== null) window.clearTimeout(this.flushTimer);
     this.flushTimer = window.setTimeout(() => {
@@ -435,93 +472,139 @@ export class AnnotationRepository {
     }
   }
 
+  /**
+   * Appends queued changes to this device's journal. Now and then, while
+   * writing anyway, lines the compacted snapshot already holds (and that are
+   * over a week old) are dropped, so the journal doesn't grow forever.
+   */
   private async writeQueuedBatches(): Promise<void> {
+    await this.prepareForWrite();
     const batch = Array.from(this.queued.entries());
-    let exists = await this.vault.adapter.exists(this.journalPath);
-    for (let offset = 0; offset < batch.length; offset += 1_000) {
-      const portion = batch.slice(offset, offset + 1_000);
-      const payload = portion.map(([, value]) => JSON.stringify(value)).join("\n") + "\n";
-      if (exists) await this.vault.adapter.append(this.journalPath, payload);
-      else {
-        await this.vault.adapter.write(this.journalPath, payload);
-        exists = true;
+    const payload = batch.map(([, value]) => JSON.stringify(value)).join("\n") + "\n";
+    const existing = await this.readIfExists(this.journalPath);
+    let rewritten = false;
+    if (existing) {
+      const entries = parseJournal(existing);
+      if (entries.length >= TRIM_THRESHOLD) {
+        const snapshot = new AnnotationMerge();
+        const snapshotText = await this.readIfExists(this.snapshotPath);
+        if (snapshotText !== null && readSnapshotV2(snapshotText, snapshot)) {
+          const drop = trimmableEntries(entries, snapshot, Date.now());
+          if (drop.size >= TRIM_THRESHOLD) {
+            const kept = entries.filter(entry => !drop.has(entry)).map(entry => JSON.stringify(entry));
+            await this.vault.adapter.write(this.journalPath, (kept.length ? `${kept.join("\n")}\n` : "") + payload);
+            rewritten = true;
+          }
+        }
       }
-      for (const [key, mutation] of portion) {
-        if (this.queued.get(key) === mutation) this.queued.delete(key);
-      }
-      if (offset + portion.length < batch.length) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+    }
+    if (!rewritten) {
+      if (existing !== null) await this.vault.adapter.append(this.journalPath, payload);
+      else await this.vault.adapter.write(this.journalPath, payload);
+    }
+    for (const [key, mutation] of batch) {
+      if (this.queued.get(key) === mutation) this.queued.delete(key);
     }
   }
 
-  async checkpoint(index: AnnotationIndex): Promise<void> {
+  /**
+   * Saves this device's changes. On the device that runs background tasks,
+   * also merges every device's changes into the compacted snapshot.
+   */
+  async checkpoint(_index?: AnnotationIndex): Promise<void> {
     await this.flushJournal();
-    if (!this.dirty) return;
-    const checkpointRevision = index.version;
-    const annotations = index.all();
-    if (await this.vault.adapter.exists(this.compactSnapshotPath)) {
-      await this.vault.adapter.write(this.compactPreviousPath, await this.vault.adapter.read(this.compactSnapshotPath));
+    if (runsBackgroundTasks()) await this.compact();
+  }
+
+  /**
+   * Re-reads every device's changes from disk and writes the merged result as
+   * the compacted snapshot, only when it differs from what is there. For the
+   * background device only: other devices never write the snapshot.
+   */
+  async compact(): Promise<boolean> {
+    await this.flushJournal();
+    const merge = await this.readMerged();
+    const text = serializeSnapshot(merge);
+    if (await this.readIfExists(this.snapshotPath) === text) return false;
+    if (!merge.annotations.size && !merge.tombstones.size && !(await this.vault.adapter.exists(this.snapshotPath))) return false;
+    await this.prepareForWrite();
+    await this.vault.adapter.write(this.snapshotPath, text);
+    return true;
+  }
+
+  /** Every device's palette edits merged, over what 1.0.x saved (which counts as oldest). */
+  private async mergedPalette(): Promise<PaletteFile> {
+    const legacy = emptyPalette();
+    const json = async (path: string): Promise<unknown> => {
+      const text = await this.readIfExists(path);
+      if (text === null) return undefined;
+      try { return JSON.parse(text) as unknown; } catch { return undefined; }
+    };
+    for (const [color, name] of Object.entries(normalizeColorNames(await json(this.colorNamesPath)))) legacy.names[color] = { value: name, at: 0 };
+    normalizeExtraColors(await json(this.extraColorsPath)).forEach((color, index) => { legacy.extras[color] = { on: true, at: 0, added: index }; });
+    const order = normalizeColorOrder(await json(this.colorOrderPath));
+    if (order.length) legacy.order = { value: order, at: 0 };
+    const layout = (await json(this.noteLayoutPath) as { layout?: unknown } | undefined)?.layout;
+    if (isNoteLayout(layout)) legacy.layout = { value: layout, at: 0 };
+    const files: PaletteFile[] = [legacy];
+    for (const name of (await this.folderFiles()).filter(file => DEVICE_PALETTE.test(file))) {
+      files.push(readPaletteFile(await json(`${this.folder}/${name}`), color => normalizeColorOrder([color])[0] ?? null));
     }
-    await this.vault.adapter.write(this.compactSnapshotPath, await compactSnapshot(annotations));
-    if (index.version === checkpointRevision && this.queued.size === 0 && !this.flushing) {
-      await this.vault.adapter.write(this.journalPath, "");
-      this.dirty = false;
-    } else {
-      this.dirty = true;
+    return mergePalettes(files);
+  }
+
+  /** The PDF's color names, added colors, heading order and note layout, merged across devices. */
+  async loadPalette(): Promise<{ names: ColorNames; extras: string[]; order: string[]; layout: NoteLayout | null }> {
+    const view = paletteView(await this.mergedPalette(), MAX_EXTRA_COLORS);
+    return { names: view.names, extras: view.extras, order: view.order, layout: isNoteLayout(view.layout) ? view.layout : null };
+  }
+
+  /** Records a palette change in this device's own palette file (read, merge, then write; nothing when unchanged). */
+  private async editPalette(next: Partial<PaletteView>): Promise<void> {
+    const merged = await this.mergedPalette();
+    const ownText = await this.readIfExists(this.palettePath);
+    let own = emptyPalette();
+    if (ownText !== null) {
+      try { own = readPaletteFile(JSON.parse(ownText), color => normalizeColorOrder([color])[0] ?? null); } catch { /* rewritten below */ }
     }
+    if (!recordPaletteEdit(own, merged, MAX_EXTRA_COLORS, next, Date.now())) return;
+    const text = serializePalette(own);
+    if (text === ownText) return;
+    await this.prepareForWrite();
+    await this.vault.adapter.write(this.palettePath, text);
   }
 
   async loadColorNames(): Promise<ColorNames> {
-    if (!(await this.vault.adapter.exists(this.colorNamesPath))) return {};
-    try {
-      return normalizeColorNames(JSON.parse(await this.vault.adapter.read(this.colorNamesPath)));
-    } catch {
-      return {};
-    }
+    return (await this.loadPalette()).names;
   }
 
   async saveColorNames(names: ColorNames): Promise<void> {
-    await this.vault.adapter.write(this.colorNamesPath, JSON.stringify(normalizeColorNames(names), null, 2));
+    await this.editPalette({ names: normalizeColorNames(names) });
   }
 
   async loadColorOrder(): Promise<string[]> {
-    if (!(await this.vault.adapter.exists(this.colorOrderPath))) return [];
-    try {
-      return normalizeColorOrder(JSON.parse(await this.vault.adapter.read(this.colorOrderPath)));
-    } catch {
-      return [];
-    }
+    return (await this.loadPalette()).order;
   }
 
   async saveColorOrder(order: string[]): Promise<void> {
-    await this.vault.adapter.write(this.colorOrderPath, JSON.stringify(normalizeColorOrder(order), null, 2));
+    await this.editPalette({ order: normalizeColorOrder(order) });
   }
 
   /** The note layout chosen for this PDF, or null before one has been chosen. */
   async loadNoteLayout(): Promise<NoteLayout | null> {
-    if (!(await this.vault.adapter.exists(this.noteLayoutPath))) return null;
-    try {
-      const value = (JSON.parse(await this.vault.adapter.read(this.noteLayoutPath)) as { layout?: unknown }).layout;
-      return isNoteLayout(value) ? value : null;
-    } catch {
-      return null;
-    }
+    return (await this.loadPalette()).layout;
   }
 
   async saveNoteLayout(layout: NoteLayout): Promise<void> {
-    await this.vault.adapter.write(this.noteLayoutPath, JSON.stringify({ layout }, null, 2));
+    await this.editPalette({ layout });
   }
 
   async loadExtraColors(): Promise<string[]> {
-    if (!(await this.vault.adapter.exists(this.extraColorsPath))) return [];
-    try {
-      return normalizeExtraColors(JSON.parse(await this.vault.adapter.read(this.extraColorsPath)));
-    } catch {
-      return [];
-    }
+    return (await this.loadPalette()).extras;
   }
 
   async saveExtraColors(colors: string[]): Promise<void> {
-    await this.vault.adapter.write(this.extraColorsPath, JSON.stringify(normalizeExtraColors(colors), null, 2));
+    await this.editPalette({ extras: normalizeExtraColors(colors) });
   }
 
   async exportReadable(index: AnnotationIndex, originalName: string): Promise<string> {
@@ -544,13 +627,33 @@ export async function openBundle(
   bytes: ArrayBuffer,
   automaticPdfBackup = false,
 ): Promise<DocumentBundle> {
-  const hash = await documentHash(vault, file, bytes);
+  const hash = await documentHash(file, bytes);
   const folder = normalizePath(`${ROOT}/${hash}`);
-  await ensureFolder(vault, folder);
   await importPreviousAnnotations(vault, hash, folder);
+  // Opening and reading a PDF writes nothing: its folder and manifest are made
+  // when there is first something to save.
+  let prepared: Promise<void> | null = null;
+  const prepare = () => prepared ??= writeManifest(vault, folder, hash, file);
   const backupPath = `${folder}/document.pdf`;
-  if (automaticPdfBackup && !(await vault.adapter.exists(backupPath))) schedulePdfBackup(vault, file.path, backupPath);
+  // Recovery copies are background work, done only by the device that runs it.
+  if (automaticPdfBackup && runsBackgroundTasks() && !(await vault.adapter.exists(backupPath))) {
+    await prepare();
+    schedulePdfBackup(vault, file.path, backupPath);
+  }
+  const repository = new AnnotationRepository(vault, folder, hash, file.path, prepare);
+  return { hash, folder, repository };
+}
+
+/** Makes the PDF's folder and records its path and name, unless that is already recorded. */
+async function writeManifest(vault: Vault, folder: string, hash: string, file: TFile): Promise<void> {
+  await ensureFolder(vault, folder);
   const manifestPath = `${folder}/manifest.json`;
+  if (await vault.adapter.exists(manifestPath)) {
+    try {
+      const previous = coerceManifest(JSON.parse(await vault.adapter.read(manifestPath)), hash);
+      if (previous?.sha256 === hash && previous.workingPath === file.path && previous.originalName === file.name) return;
+    } catch { /* replace malformed manifests */ }
+  }
   const manifest: BundleManifest = {
     version: 1,
     sha256: hash,
@@ -558,25 +661,15 @@ export async function openBundle(
     originalName: file.name,
     updatedAt: new Date().toISOString(),
   };
-  let shouldWriteManifest = true;
-  if (await vault.adapter.exists(manifestPath)) {
-    try {
-      const previous = coerceManifest(JSON.parse(await vault.adapter.read(manifestPath)), hash);
-      if (previous?.sha256 === hash && previous.workingPath === file.path && previous.originalName === file.name) {
-        shouldWriteManifest = false;
-      }
-    } catch { /* replace malformed manifests */ }
-  }
-  if (shouldWriteManifest) await vault.adapter.write(manifestPath, JSON.stringify(manifest, null, 2));
-  const repository = new AnnotationRepository(vault, folder, hash, file.path);
-  return { hash, folder, repository };
+  await vault.adapter.write(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
 async function hasAnnotationFiles(vault: Vault, folder: string): Promise<boolean> {
-  for (const name of ANNOTATION_FILES) {
-    if (await vault.adapter.exists(`${folder}/${name}`)) return true;
-  }
-  return false;
+  if (!(await vault.adapter.exists(folder))) return false;
+  return (await vault.adapter.list(folder)).files.some(path => {
+    const name = path.split("/").at(-1) ?? "";
+    return ANNOTATION_FILES.includes(name) || name === SNAPSHOT_V2_FILE || DEVICE_JOURNAL.test(name);
+  });
 }
 
 /** One-way, one-time copy from the newest previous storage location that has this PDF. */
@@ -586,6 +679,7 @@ async function importPreviousAnnotations(vault: Vault, hash: string, folder: str
     const source = `${root}/${hash}`;
     if (!(await hasAnnotationFiles(vault, source))) continue;
     try {
+      await ensureFolder(vault, folder);
       for (const name of [...ANNOTATION_FILES, COLOR_NAMES_FILE, COLOR_ORDER_FILE, EXTRA_COLORS_FILE, NOTE_LAYOUT_FILE]) {
         if (await vault.adapter.exists(`${source}/${name}`)) await vault.adapter.copy(`${source}/${name}`, `${folder}/${name}`);
       }
@@ -593,6 +687,17 @@ async function importPreviousAnnotations(vault: Vault, hash: string, folder: str
       console.error(`Lumen could not import annotations from ${root}`, error);
     }
     return;
+  }
+}
+
+/** A PDF folder's manifest, or null when it is missing or damaged. */
+export async function readBundleManifest(vault: Vault, folder: string, hash: string): Promise<BundleManifest | null> {
+  const path = `${folder}/manifest.json`;
+  if (!(await vault.adapter.exists(path))) return null;
+  try {
+    return coerceManifest(JSON.parse(await vault.adapter.read(path)), hash);
+  } catch {
+    return null;
   }
 }
 
